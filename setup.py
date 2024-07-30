@@ -128,6 +128,10 @@ environments = {
         f'gymnasium=={GYMNASIUM_VERSION}',
         'minihack==0.1.5',
     ],
+    'myosuite': [
+        'myosuite<2.6',
+        'numpy==1.23.3',  # myosuite installs numpy 2, so revert back
+    ],
     'nethack': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
@@ -226,6 +230,7 @@ setup(
         f'gymnasium<={GYMNASIUM_VERSION}',
         f'pettingzoo<={PETTINGZOO_VERSION}',
         'shimmy[gym-v21]',
+        'filelock',
     ],
     extras_require={
         'docs': docs,
