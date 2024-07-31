@@ -34,11 +34,7 @@ docs = [
 cleanrl = [
     'stable_baselines3==2.1.0',
     'tensorboard==2.11.2',
-    'torch',
-    'wandb==0.13.7',
-    'psutil==5.9.5',
     'tyro==0.5.10',
-    'pynvml'
 ]
 
 ray = [
@@ -231,6 +227,10 @@ setup(
         f'pettingzoo<={PETTINGZOO_VERSION}',
         'shimmy[gym-v21]',
         'filelock',
+        'torch',
+        'wandb',
+        'psutil',
+        'pynvml',
     ],
     extras_require={
         'docs': docs,
