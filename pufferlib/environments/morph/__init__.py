@@ -1,12 +1,13 @@
 from .environment import env_creator
 
 try:
-    import torch
+    # NOTE: demo.py looks the policy class from the torch module
+    import pufferlib.environments.morph.policy as torch
 except ImportError:
     pass
 else:
-    from .torch import Policy
+    from .policy import Policy
     try:
-        from .torch import Recurrent
+        from .policy import Recurrent
     except:
         Recurrent = None

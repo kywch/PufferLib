@@ -1,6 +1,7 @@
 import os
 import sys
 from enum import Enum
+from types import SimpleNamespace
 
 from isaacgym import gymapi
 import gymtorch
@@ -8,14 +9,12 @@ import gymtorch
 from gym import spaces
 import torch
 import numpy as np
-from easydict import EasyDict
 
 from smpl_sim.smpllib.smpl_joint_names import SMPL_MUJOCO_NAMES
 
-from phc import PHC_ROOT
-from phc.pufferl.poselib_skeleton import SkeletonTree
-from phc.pufferl.motion_lib import MotionLibSMPL, FixHeightMode
-from phc.pufferl.torch_utils import (
+from pufferlib.environments.morph.poselib_skeleton import SkeletonTree
+from pufferlib.environments.morph.motion_lib import MotionLibSMPL, FixHeightMode
+from pufferlib.environments.morph.torch_utils import (
     to_torch,
     torch_rand_float,
     exp_map_to_quat,
@@ -380,7 +379,8 @@ class HumanoidPHC:
         self.humanoid_shapes = torch.tensor(np.array([self.gender_beta] * self.num_envs)).float().to(self.device)
 
         # NOTE: The below SMPL assets must be present.
-        asset_file_real = str(PHC_ROOT / f"phc/data/assets/mjcf/smpl_{int(self.gender_beta[0])}_humanoid.xml")
+        # asset_file_real = str(PHC_ROOT / f"phc/data/assets/mjcf/smpl_{int(self.gender_beta[0])}_humanoid.xml")
+        asset_file_real = "resources/smpl_humanoid.xml"
         assert os.path.exists(asset_file_real)
 
         sk_tree = SkeletonTree.from_mjcf(asset_file_real)
@@ -391,7 +391,7 @@ class HumanoidPHC:
         asset_options.max_angular_velocity = 100.0
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
 
-        self.humanoid_asset = self.gym.load_asset(self.sim, "/", asset_file_real, asset_options)
+        self.humanoid_asset = self.gym.load_asset(self.sim, ".", asset_file_real, asset_options)
         self.num_bodies = self.gym.get_asset_rigid_body_count(self.humanoid_asset)
         self.num_dof = self.gym.get_asset_dof_count(self.humanoid_asset)
 
@@ -897,20 +897,18 @@ class HumanoidPHC:
         self.ref_dof_pos = torch.zeros_like(self._dof_pos)
 
     def _load_motion(self, motion_train_file, motion_test_file=None):
-        motion_lib_cfg = EasyDict(
-            {
-                "motion_file": motion_train_file,
-                "device": self.device,
-                "fix_height": FixHeightMode.full_fix,
-                "min_length": self._min_motion_len,
-                "max_length": self._max_motion_len,
-                "im_eval": self.flag_im_eval,
-                "multi_thread": False,  # CHECK ME: need to config?
-                "smpl_type": self.humanoid_type,
-                "randomrize_heading": True,
-                "step_dt": self.dt,
-                "is_deterministic": self.flag_debug,
-            }
+        motion_lib_cfg = SimpleNamespace(
+            motion_file=motion_train_file,
+            device=self.device,
+            fix_height=FixHeightMode.full_fix,
+            min_length=self._min_motion_len,
+            max_length=self._max_motion_len,
+            im_eval=self.flag_im_eval,
+            multi_thread=False,  # CHECK ME: need to config?
+            smpl_type=self.humanoid_type,
+            randomrize_heading=True,
+            step_dt=self.dt,
+            is_deterministic=self.flag_debug,
         )
         self._motion_train_lib = MotionLibSMPL(motion_lib_cfg)
 

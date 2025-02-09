@@ -109,7 +109,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--num_envs", type=int, default=32)
-    parser.add_argument("-m", "--motion_file", type=str, default="sample_data/amass_train_take6_upright.pkl")
+    parser.add_argument("-m", "--motion_file", type=str, default="/workspace/dataset/AMASS/amass_train_take6_upright.pkl")
     parser.add_argument("--disable_self_collision", action="store_true")
     args = parser.parse_args()
 
@@ -128,13 +128,9 @@ if __name__ == "__main__":
         sps = int(steps / (end - start))
         print(f"Steps: {steps}, SPS: {sps}")
 
-    cfg = {
-        "env": {
-            "num_envs": args.num_envs,
-            "motion_file": args.motion_file,
-        },
-        "robot": {"has_self_collision": not args.disable_self_collision},
-    }
-
-    env = PHCPufferEnv(cfg)
+    env = PHCPufferEnv(
+        motion_file=args.motion_file,
+        has_self_collision=not args.disable_self_collision,
+        num_envs=args.num_envs,
+    )
     test_perf(env)

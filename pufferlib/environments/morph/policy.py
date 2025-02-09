@@ -10,7 +10,7 @@ class Recurrent(pufferlib.models.LSTMWrapper):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
 
 class Policy(nn.Module):
-    def __init__(self, env, input_dim, action_dim, demo_dim, hidden):
+    def __init__(self, env, input_dim=934, action_dim=69, demo_dim=358, hidden=512):
         super().__init__()
         self.is_continuous = True
 
@@ -50,10 +50,10 @@ class Policy(nn.Module):
             nn.SiLU(),
             layer_init(nn.Linear(1024, 512)),
             nn.SiLU(),
-            layer_init(nn.Linear(512, action_dim)),
+            layer_init(nn.Linear(512, hidden)),
             nn.SiLU(),
+            layer_init(nn.Linear(hidden, 1)),
         )
-        self.value = nn.Linear(hidden, 1)
 
         ### Discriminator
         self._disc_mlp = nn.Sequential(
@@ -66,7 +66,8 @@ class Policy(nn.Module):
 
     def forward(self, observations):
         hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
+        actions, _ = self.decode_actions(hidden, lookup)
+        value = self.critic_mlp(observations)
         return actions, value
 
     def encode_observations(self, obs):
@@ -76,8 +77,9 @@ class Policy(nn.Module):
         mu = self.mu(hidden)
         std = torch.exp(self.sigma).expand_as(mu)
         probs = torch.distributions.Normal(mu, std)
-        value = self.value(hidden)
-        return probs, value
+
+        # value = self.value(hidden)
+        return probs, 0  # NOTE: value comes form the separate critic network
 
     def discriminate(self, amp_obs):
         disc_mlp_out = self._disc_mlp(amp_obs)
@@ -95,5 +97,3 @@ class Policy(nn.Module):
 
         weights.append(torch.flatten(self._disc_logits.weight))
         return weights
-
-
