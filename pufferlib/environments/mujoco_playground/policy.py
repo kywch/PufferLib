@@ -53,9 +53,10 @@ class Policy(nn.Module):
         return self.forward_eval(observations, state)
 
     def encode_observations(self, observations, state=None):
-        self.privileged_obs = observations
+        scaled_obs = observations / 20.0
+        self.privileged_obs = scaled_obs
         # NOTE: actor only uses the non-privileged
-        return self.actor_mlp(observations[:, : self.actor_obs_size])
+        return self.actor_mlp(scaled_obs[:, : self.actor_obs_size])
 
     def decode_actions(self, hidden):
         """Decodes a batch of hidden states into (multi)discrete actions.

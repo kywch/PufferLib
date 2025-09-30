@@ -10,26 +10,19 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
 os.environ["MUJOCO_GL"] = "egl"
 
-
+import gymnasium as gym
 import jax
-
-jax.config.update("jax_enable_x64", False)
-
 import jax.numpy as jnp
-from jax.dlpack import from_dlpack
 import numpy as np
 import numpy.typing as npt
-import gymnasium as gym
 import torch
-import torch.nn as nn
 import torch.utils.dlpack as tpack
-import pufferlib
-
-from mujoco import mjx
 from brax.envs.wrappers import training as brax_training
+from mujoco import mjx
+
+import pufferlib
 from mujoco_playground import registry, wrapper
 from mujoco_playground._src import mjx_env
-
 
 # Suppress DeprecationWarnings from JAX
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="jax")
@@ -113,9 +106,11 @@ class MujocoPlaygroundPufferEnv(pufferlib.PufferEnv):
         action_repeat,
         device,
         randomization_fn=None,
+        reward_scale=0.1,
         # buf=None,
     ):
         self.num_agents = num_envs  # Treat each env as an agent
+        self.reward_scale = reward_scale
 
         # NOTE: Not supporting vision-based RL for now
         # NOTE: Mujoco playground envs provides asymmetric obs in dict.
@@ -234,17 +229,25 @@ class MujocoPlaygroundPufferEnv(pufferlib.PufferEnv):
             self.env_state = self.step_fn(self.env_state, action)
 
         self.observations[:] = _jax_to_torch(self.env_state.obs["privileged_state"])
-        self.rewards[:] = _jax_to_torch(self.env_state.reward)
         self.terminals[:] = _jax_to_torch(self.env_state.done)
         self.truncations[:] = _jax_to_torch(self.env_state.info["truncation"])
+
+        # CHECK ME: is reward_scale only reflected in training, and NOT logging?
+        self.rewards[:] = _jax_to_torch(self.env_state.reward) * self.reward_scale
 
         # NOTE: exclude truncation steps from training
         self.masks[:] = ~self.truncations
 
         info_ret = {}
+        # These metrics come out each step
         for k, v in self.env_state.metrics.items():
             if k not in info_ret:
                 info_ret[k] = _jax_to_torch(v).float().mean().item()
+
+        done_envs = self.env_state.info["episode_done"].astype(bool)
+        if jnp.any(done_envs):
+            info_ret["episode_length"] = self.env_state.info["episode_metrics"]["length"][done_envs].mean().item()
+            info_ret["episode_return"] = self.env_state.info["episode_metrics"]["sum_reward"][done_envs].mean().item()
 
         return (
             self.observations,
@@ -266,7 +269,6 @@ if __name__ == "__main__":
     import cProfile
     import pstats
 
-
     import pufferlib.vector
     from pufferlib import pufferl
     from pufferlib.environments.mujoco_playground.policy import Policy
@@ -277,18 +279,28 @@ if __name__ == "__main__":
     policy = Policy(vecenv.driver_env).cuda()
     args = pufferl.load_config("default")
     args["train"]["env"] = env_name
+    args["train"]["total_timesteps"] = 200_000_000
+    args["train"]["learning_rate"] = 0.0003
+    args["train"]["update_epochs"] = 3
+    args["train"]["gamma"] = 0.98
+    args["train"]["gae_lambda"] = 0.95
+    args["train"]["ent_coef"] = 0.001
+
     # args["train"]["compile"] = True
 
-    trainer = pufferl.PuffeRL(args["train"], vecenv, policy)
+    # logger = pufferl.WandbLogger(args)
+    logger = None
 
-    for epoch in range(10):
+    trainer = pufferl.PuffeRL(args["train"], vecenv, policy, logger)
+
+    while trainer.global_step < args["train"]["total_timesteps"]:
         trainer.evaluate()
         logs = trainer.train()
 
-    cProfile.run('trainer.evaluate()', 'stats.prof')
-    p = pstats.Stats('stats.prof')
-    p.sort_stats('cumtime')
-    p.print_stats(30)
+    # cProfile.run('trainer.evaluate()', 'stats.prof')
+    # p = pstats.Stats('stats.prof')
+    # p.sort_stats('cumtime')
+    # p.print_stats(30)
 
     trainer.print_dashboard()
     trainer.close()
