@@ -1082,12 +1082,12 @@ def load_policy(args, vecenv, env_name=''):
     env_module = importlib.import_module(module_name)
 
     device = args['train']['device']
-    policy_cls = getattr(env_module.torch, args['policy_name'])
+    policy_cls = getattr(env_module, args['policy_name'])
     policy = policy_cls(vecenv.driver_env, **args['policy'])
 
     rnn_name = args['rnn_name']
     if rnn_name is not None:
-        rnn_cls = getattr(env_module.torch, args['rnn_name'])
+        rnn_cls = getattr(env_module, args['rnn_name'])
         policy = rnn_cls(vecenv.driver_env, policy, **args['rnn'])
 
     policy = policy.to(device)
