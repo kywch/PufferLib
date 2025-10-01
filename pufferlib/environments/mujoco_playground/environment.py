@@ -32,7 +32,10 @@ warnings.filterwarnings("ignore", category=UserWarning, module="absl")
 
 # TODO: Alias all mp envs to "mp_" + all lower case
 # NOTE: Not supporting vision-based RL for now
-ALIASES = {"mp_leapcubereorient": "LeapCubeReorient"}
+ALIASES = {
+    "mp_leapcubereorient": "LeapCubeReorient",
+    "mp_cheetahrun": "CheetahRun",
+}
 
 
 def env_creator(name="LeapCubeReorient", **kwargs):
@@ -111,12 +114,21 @@ class MujocoPlaygroundPufferEnv(pufferlib.PufferEnv):
     ):
         self.num_agents = num_envs  # Treat each env as an agent
         self.reward_scale = reward_scale
+        self.use_privileged_obs = False
 
         # NOTE: Not supporting vision-based RL for now
         # NOTE: Mujoco playground envs provides asymmetric obs in dict.
         # The privileged obs is actor obs (actor obs size) + priviliged info.
-        obs_shape = env.observation_size["privileged_state"]
-        self._actor_obs_size = env.observation_size["state"][0]
+        if isinstance(env.observation_size, dict):
+            self.use_privileged_obs = True
+            obs_shape = env.observation_size["privileged_state"]
+            self._actor_obs_size = env.observation_size["state"][0]
+        elif isinstance(env.observation_size, int):
+            obs_shape = (env.observation_size,)
+            self._actor_obs_size = env.observation_size
+        else:
+            raise NotImplementedError
+
         self.single_observation_space = gym.spaces.Box(
             low=-np.inf,
             high=np.inf,
@@ -216,8 +228,11 @@ class MujocoPlaygroundPufferEnv(pufferlib.PufferEnv):
             warnings.filterwarnings("ignore", category=RuntimeWarning, module="jax")
             self.env_state = self.reset_fn(self.key_reset)
 
-        # NOTE: The policy should separate state and priviliged info
-        self.observations[:] = _jax_to_torch(self.env_state.obs["privileged_state"])
+        if self.use_privileged_obs:
+            # NOTE: The policy should separate state and priviliged info
+            self.observations[:] = _jax_to_torch(self.env_state.obs["privileged_state"])
+        else:
+            self.observations[:] = _jax_to_torch(self.env_state.obs)
 
         return self.observations, []
 
@@ -228,12 +243,16 @@ class MujocoPlaygroundPufferEnv(pufferlib.PufferEnv):
             warnings.filterwarnings("ignore", category=RuntimeWarning, module="jax")
             self.env_state = self.step_fn(self.env_state, action)
 
-        self.observations[:] = _jax_to_torch(self.env_state.obs["privileged_state"])
+        if self.use_privileged_obs:
+            # NOTE: The policy should separate state and priviliged info
+            self.observations[:] = _jax_to_torch(self.env_state.obs["privileged_state"])
+        else:
+            self.observations[:] = _jax_to_torch(self.env_state.obs)
+
         self.terminals[:] = _jax_to_torch(self.env_state.done)
         self.truncations[:] = _jax_to_torch(self.env_state.info["truncation"])
 
-        # CHECK ME: is reward_scale only reflected in training, and NOT logging?
-        self.rewards[:] = _jax_to_torch(self.env_state.reward) * self.reward_scale
+        self.rewards[:] = _jax_to_torch(self.env_state.reward) # * self.reward_scale
 
         # NOTE: exclude truncation steps from training
         self.masks[:] = ~self.truncations
@@ -273,18 +292,19 @@ if __name__ == "__main__":
     from pufferlib import pufferl
     from pufferlib.environments.mujoco_playground.policy import Policy
 
-    env_name = "mp_leapcubereorient"
+    # env_name = "mp_leapcubereorient"
+    env_name = "mp_cheetahrun"
 
     vecenv = pufferlib.vector.make(env_creator(env_name), env_kwargs={"num_envs": 4096})
     policy = Policy(vecenv.driver_env).cuda()
     args = pufferl.load_config("default")
     args["train"]["env"] = env_name
-    args["train"]["total_timesteps"] = 200_000_000
-    args["train"]["learning_rate"] = 0.0003
-    args["train"]["update_epochs"] = 3
-    args["train"]["gamma"] = 0.98
-    args["train"]["gae_lambda"] = 0.95
-    args["train"]["ent_coef"] = 0.001
+    args["train"]["total_timesteps"] = 20_000_000
+    # args["train"]["learning_rate"] = 0.0003
+    # args["train"]["update_epochs"] = 3
+    # args["train"]["gamma"] = 0.98
+    # args["train"]["gae_lambda"] = 0.95
+    # args["train"]["ent_coef"] = 0.001
 
     # args["train"]["compile"] = True
 
