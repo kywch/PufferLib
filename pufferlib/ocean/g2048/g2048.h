@@ -5,7 +5,9 @@
 #include <math.h>
 #include <string.h>
 #include "raylib.h"
-#define max(a, b) (((a) > (b)) ? (a) : (b))
+
+static inline int min(int a, int b) { return a < b ? a : b; }
+static inline int max(int a, int b) { return a > b ? a : b; }
 
 #define SIZE 4
 #define EMPTY 0
@@ -13,18 +15,12 @@
 #define DOWN 2
 #define LEFT 3
 #define RIGHT 4
-#define BASE_MAX_TICKS 2000
+#define BASE_MAX_TICKS 1000
 
 // Precomputed constants
 #define REWARD_MULTIPLIER 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
-
-// Features: 18 per cell
-// 1. Normalized tile value (current_val / max_val)
-// 2. One-hot for empty (1 if empty, 0 if occupied)
-// 3-18. One-hot for tile values 2^1 to 2^16 (16 features)
-#define NUM_FEATURES 18
 
 // To normalize perf from 0 to 1. Only used with perf.
 #define OBSERVED_MAX_TILE 4096.0f
@@ -39,20 +35,25 @@ typedef struct {
 } Log;
 
 typedef struct {
-    Log log;                        // Required
     unsigned char* observations;    // Cheaper in memory if encoded in uint_8
     int* actions;                   // Required
     float* rewards;                 // Required
     unsigned char* terminals;       // Required
-    int score;
-    int tick;
+    
+    long long merge_score;          // Experienced overflow in scaffolding runs, so ...
+    Log log;                        // Required
+
+    float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
+    bool is_scaffolding_episode;
+
     unsigned char grid[SIZE][SIZE];
+    int max_episode_ticks;          // Dynamic max_ticks based on score
+    int tick;
+
+    int empty_count;
+    unsigned char max_tile;
     float episode_reward;           // Accumulate episode reward
     int moves_made;
-    int max_episode_ticks;          // Dynamic max_ticks based on score
-    
-    // Cached values to avoid recomputation
-    int empty_count;
     bool game_over_cached;
     bool grid_changed;
 } Game;
@@ -93,19 +94,7 @@ void init(Game* env) {
     env->actions = (int*)malloc(1 * sizeof(int));
     env->rewards = (float*)malloc(1 * sizeof(float));
     env->terminals = (unsigned char*)malloc(1 * sizeof(unsigned char));
-}
-
-static inline unsigned char get_max_tile(Game* game) {
-    unsigned char max_tile = 0;
-    // Unroll loop for better performance
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (game->grid[i][j] > max_tile) {
-                max_tile = game->grid[i][j];
-            }
-        }
-    }
-    return max_tile;
+    env->scaffolding_ratio = max(0.0f, min(1.0f, env->scaffolding_ratio));
 }
 
 // Inline function for updating observations (avoid function call overhead)
@@ -129,10 +118,12 @@ static inline void update_empty_count(Game* game) {
 }
 
 void add_log(Game* game) {
-    unsigned char s = get_max_tile(game);
-    game->log.score += (float)(1 << s);
-    game->log.perf += (float)(1 << s) / OBSERVED_MAX_TILE;
-    game->log.merge_score += (float)game->score;
+    // Scaffolding runs will distort stats, so skip logging
+    if (game->is_scaffolding_episode) return;
+
+    game->log.score += (float)(1 << game->max_tile);
+    game->log.perf += (float)(1 << game->max_tile) / OBSERVED_MAX_TILE;
+    game->log.merge_score += (float)game->merge_score;
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
     game->log.n += 1;
@@ -144,8 +135,8 @@ void c_reset(Game* game) {
             game->grid[i][j] = EMPTY;
         }
     }
-
-    game->score = 0;
+    
+    game->merge_score = 0LL;
     game->tick = 0;
     game->episode_reward = 0;
     game->empty_count = SIZE * SIZE;
@@ -153,7 +144,11 @@ void c_reset(Game* game) {
     game->grid_changed = true;
     game->moves_made = 0;
     game->max_episode_ticks = BASE_MAX_TICKS;
-    
+    game->max_tile = 0;
+
+    // Higher tiles are spawned in scaffolding episodes
+    game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
+
     if (game->terminals) game->terminals[0] = 0;
     
     // Add two random tiles at the start - optimized version
@@ -162,7 +157,9 @@ void c_reset(Game* game) {
         int i = pos / SIZE;
         int j = pos % SIZE;
         if (game->grid[i][j] == EMPTY) {
-            game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+            unsigned char val = (rand() % 10 == 0) ? 2 : 1;
+            game->grid[i][j] = val;
+            if (val > game->max_tile) game->max_tile = val;
             added++;
             game->empty_count--;
         }
@@ -192,15 +189,25 @@ void add_random_tile(Game* game) {
     if (chosen_pos >= 0) {
         int i = chosen_pos / SIZE;
         int j = chosen_pos % SIZE;
-        // Implement the 90% 2, 10% 4 rule
-        game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+
+        unsigned char new_tile = 0;
+        if (game->is_scaffolding_episode) {
+            // Scaffolding: spawn tiles up to max tile (or 2^17...)
+            new_tile = min(17, (rand() % max(1, (int)game->max_tile)) + 1);
+        } else {
+            // Normal: Implement the 90% 2, 10% 4 rule
+            new_tile = (rand() % 10 == 0) ? 2 : 1;
+        }
+
+        game->grid[i][j] = new_tile;
+        if (new_tile > game->max_tile) game->max_tile = new_tile;
         game->empty_count--;
         game->grid_changed = true;
     }
 }
 
 // Optimized slide and merge with fewer memory operations
-static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase) {
+static inline bool slide_and_merge(Game* game, unsigned char* row, float* reward, double* score_increase) {
     bool moved = false;
     int write_pos = 0;
     
@@ -220,8 +227,9 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
+            if (row[i] > game->max_tile) game->max_tile = row[i];
             *reward += ((float)row[i]) * REWARD_MULTIPLIER;
-            *score_increase += (float)(1 << (int)row[i]);
+            *score_increase += (double)(1ULL << min(row[i], 24));
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
                 row[j] = row[j + 1];
@@ -234,7 +242,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     return moved;
 }
 
-bool move(Game* game, int direction, float* reward, float* score_increase) {
+bool move(Game* game, int direction, float* reward, double* score_increase) {
     bool moved = false;
     unsigned char temp[SIZE];
     
@@ -246,7 +254,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[idx][col];
             }
             
-            if (slide_and_merge(temp, reward, score_increase)) {
+            if (slide_and_merge(game, temp, reward, score_increase)) {
                 moved = true;
                 // Write back column
                 for (int i = 0; i < SIZE; i++) {
@@ -263,7 +271,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[row][idx];
             }
             
-            if (slide_and_merge(temp, reward, score_increase)) {
+            if (slide_and_merge(game, temp, reward, score_increase)) {
                 moved = true;
                 // Write back row
                 for (int i = 0; i < SIZE; i++) {
@@ -319,20 +327,22 @@ bool is_game_over(Game* game) {
 
 void c_step(Game* game) {
     float reward = 0.0f;
-    float score_add = 0.0f;
+    double score_add = 0.0;
     bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
     game->tick++;
 
     if (did_move) {
         game->moves_made++;
         add_random_tile(game);
-        game->score += score_add;
+        game->merge_score += (long long)score_add;
         update_empty_count(game); // Update after adding tile
         update_observations(game); // Observations only change if the grid changes
 
-        // This is to limit infinite invalid moves during eval
-        // Don't need to be tight. Don't need to show to user?
-        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
+        if (!game->is_scaffolding_episode) {
+            // This is to limit infinite invalid moves during eval
+            // Don't need to be tight. Don't need to show to user?
+            game->max_episode_ticks = max(BASE_MAX_TICKS, game->merge_score / 10);
+        }
 
     } else {
         reward = INVALID_MOVE_PENALTY;
@@ -341,7 +351,8 @@ void c_step(Game* game) {
 
     bool game_over = is_game_over(game);
     bool max_ticks_reached = game->tick >= game->max_episode_ticks;
-    game->terminals[0] = (game_over || max_ticks_reached) ? 1 : 0;
+    bool max_tile_reached = game->max_tile >= 20; // this is especially for scaffolding runs
+    game->terminals[0] = (game_over || max_ticks_reached || max_tile_reached) ? 1 : 0;
 
     // Game over penalty overrides other rewards
     if (game_over) {
@@ -403,7 +414,7 @@ void c_render(Game* game) {
     }
     
     // Draw score (format once per frame)
-    snprintf(score_text, sizeof(score_text), "Score: %d", game->score);
+    snprintf(score_text, sizeof(score_text), "Score: %lld", game->merge_score);
     DrawText(score_text, 10, px * SIZE + 10, 24, PUFF_WHITE);
 
     snprintf(score_text, sizeof(score_text), "Moves: %d", game->moves_made);
@@ -413,7 +424,5 @@ void c_render(Game* game) {
 }
 
 void c_close(Game* game) {
-    if (IsWindowReady()) {
-        CloseWindow();
-    }
+    CloseWindow();
 }

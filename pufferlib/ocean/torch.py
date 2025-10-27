@@ -987,7 +987,9 @@ class G2048(nn.Module):
         self.encoder = torch.nn.Sequential(
             nn.Embedding(num_obs, 8),
             nn.Flatten(),
-            pufferlib.pytorch.layer_init(nn.Linear(128, hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(128, 256)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
             nn.GELU(),
         )
             
