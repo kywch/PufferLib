@@ -976,3 +976,43 @@ class Drone(nn.Module):
 
         values = self.value(hidden)
         return logits, values
+
+class G2048(nn.Module):
+    def __init__(self, env, hidden_size=64):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.is_continuous = False
+
+        num_obs = np.prod(env.single_observation_space.shape)
+        self.encoder = torch.nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(num_obs, 256)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(256, 128)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(128, hidden_size)),
+            nn.GELU(),
+        )
+            
+        num_atns = env.single_action_space.n
+        self.decoder = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, num_atns), std=0.01)
+        self.value = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
+
+    def forward_eval(self, observations, state=None):
+        hidden = self.encode_observations(observations, state=state)
+        logits, values = self.decode_actions(hidden)
+        return logits, values
+
+    def forward(self, observations, state=None):
+        return self.forward_eval(observations, state)
+
+    def encode_observations(self, observations, state=None):
+        batch_size = observations.shape[0]
+        observations = observations.view(batch_size, -1)
+        return self.encoder(observations.float())
+
+    def decode_actions(self, hidden):
+        logits = self.decoder(hidden)
+        values = self.value(hidden)
+        return logits, values

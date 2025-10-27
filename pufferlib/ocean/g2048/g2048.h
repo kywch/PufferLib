@@ -20,7 +20,13 @@
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
 
-// To normalize perf from 0 to 1. Reachable with hidden size 256.
+// Features: 18 per cell
+// 1. Normalized tile value (current_val / max_val)
+// 2. One-hot for empty (1 if empty, 0 if occupied)
+// 3-18. One-hot for tile values 2^1 to 2^16 (16 features)
+#define NUM_FEATURES 18
+
+// To normalize perf from 0 to 1. Only used with perf.
 #define OBSERVED_MAX_TILE 4096.0f
 
 typedef struct {
@@ -81,11 +87,43 @@ void c_step(Game* env);
 void c_render(Game* env);
 void c_close(Game* env);
 
-// Inline function for updating observations (avoid function call overhead)
-static inline void update_observations(Game* game) {
+static inline unsigned char get_max_tile(Game* game) {
+    unsigned char max_tile = 0;
+    // Unroll loop for better performance
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
-            game->observations[i * SIZE + j] = game->grid[i][j];
+            if (game->grid[i][j] > max_tile) {
+                max_tile = game->grid[i][j];
+            }
+        }
+    }
+    return max_tile;
+}
+
+// Inline function for updating observations (avoid function call overhead)
+static inline void update_observations(Game* game) {
+    // Observation: 4x4 grid, 18 features per cell
+    // 1. Normalized tile value (current_val / max_val)
+    // 2. One-hot for empty (1 if empty, 0 if occupied)
+    // 3. One-hot for tile values 2^1 to 2^16 (16 features)
+    
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            int base_idx = (i * SIZE + j) * NUM_FEATURES;
+            unsigned char grid_val = game->grid[i][j];
+
+            // Feature 1: The original tile values ** 1.5, to make a bit superlinear within uint8
+            game->observations[base_idx] = (unsigned char)pow((float)grid_val, 1.5f);
+
+            // Feature 2: One-hot for empty
+            game->observations[base_idx + 1] = (grid_val == EMPTY) ? 1 : 0;
+
+            // Features 3-18: One-hot for tile values
+            // NOTE: If this ever gets close to 131072, revisit this
+            memset(&game->observations[base_idx + 2], 0, 16 * sizeof(char));
+            if (grid_val > 0 && grid_val <= 16) {
+                game->observations[base_idx + 1 + grid_val] = 1;
+            }
         }
     }
 }
@@ -99,19 +137,6 @@ static inline void update_empty_count(Game* game) {
         }
     }
     game->empty_count = count;
-}
-
-static inline unsigned char get_max_tile(Game* game) {
-    unsigned char max_tile = 0;
-    // Unroll loop for better performance
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (game->grid[i][j] > max_tile) {
-                max_tile = game->grid[i][j];
-            }
-        }
-    }
-    return max_tile;
 }
 
 void add_log(Game* game) {
@@ -183,8 +208,6 @@ void add_random_tile(Game* game) {
         game->empty_count--;
         game->grid_changed = true;
     }
-    
-    update_observations(game);
 }
 
 // Optimized slide and merge with fewer memory operations
@@ -310,31 +333,34 @@ void c_step(Game* game) {
     float score_add = 0.0f;
     bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
     game->tick++;
-    
+
     if (did_move) {
         game->moves_made++;
         add_random_tile(game);
         game->score += score_add;
         update_empty_count(game); // Update after adding tile
+        update_observations(game); // Observations only change if the grid changes
+
         // This is to limit infinite invalid moves during eval
         // Don't need to be tight. Don't need to show to user?
         game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
+
     } else {
         reward = INVALID_MOVE_PENALTY;
+        // No need to update observations if the grid hasn't changed
     }
 
     bool game_over = is_game_over(game);
     bool max_ticks_reached = game->tick >= game->max_episode_ticks;
     game->terminals[0] = (game_over || max_ticks_reached) ? 1 : 0;
 
+    // Game over penalty overrides other rewards
     if (game_over) {
         reward = GAME_OVER_PENALTY;
     }
-    
+
     game->rewards[0] = reward;
     game->episode_reward += reward;
-
-    update_observations(game);
 
     if (game->terminals[0]) {
         add_log(game);
