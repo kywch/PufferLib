@@ -978,17 +978,15 @@ class Drone(nn.Module):
         return logits, values
 
 class G2048(nn.Module):
-    def __init__(self, env, hidden_size=64):
+    def __init__(self, env, hidden_size=128):
         super().__init__()
         self.hidden_size = hidden_size
         self.is_continuous = False
 
         num_obs = np.prod(env.single_observation_space.shape)
         self.encoder = torch.nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(num_obs, 256)),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(256, 128)),
-            nn.GELU(),
+            nn.Embedding(num_obs, 8),
+            nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(128, hidden_size)),
             nn.GELU(),
         )
@@ -1010,7 +1008,7 @@ class G2048(nn.Module):
     def encode_observations(self, observations, state=None):
         batch_size = observations.shape[0]
         observations = observations.view(batch_size, -1)
-        return self.encoder(observations.float())
+        return self.encoder(observations.int())
 
     def decode_actions(self, hidden):
         logits = self.decoder(hidden)

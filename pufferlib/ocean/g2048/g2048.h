@@ -87,6 +87,14 @@ void c_step(Game* env);
 void c_render(Game* env);
 void c_close(Game* env);
 
+void init(Game* env) {
+    srand(time(NULL));
+    env->observations = (unsigned char*)malloc(SIZE * SIZE * sizeof(unsigned char));
+    env->actions = (int*)malloc(1 * sizeof(int));
+    env->rewards = (float*)malloc(1 * sizeof(float));
+    env->terminals = (unsigned char*)malloc(1 * sizeof(unsigned char));
+}
+
 static inline unsigned char get_max_tile(Game* game) {
     unsigned char max_tile = 0;
     // Unroll loop for better performance
@@ -102,28 +110,9 @@ static inline unsigned char get_max_tile(Game* game) {
 
 // Inline function for updating observations (avoid function call overhead)
 static inline void update_observations(Game* game) {
-    // Observation: 4x4 grid, 18 features per cell
-    // 1. Normalized tile value (current_val / max_val)
-    // 2. One-hot for empty (1 if empty, 0 if occupied)
-    // 3. One-hot for tile values 2^1 to 2^16 (16 features)
-    
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
-            int base_idx = (i * SIZE + j) * NUM_FEATURES;
-            unsigned char grid_val = game->grid[i][j];
-
-            // Feature 1: The original tile values ** 1.5, to make a bit superlinear within uint8
-            game->observations[base_idx] = (unsigned char)pow((float)grid_val, 1.5f);
-
-            // Feature 2: One-hot for empty
-            game->observations[base_idx + 1] = (grid_val == EMPTY) ? 1 : 0;
-
-            // Features 3-18: One-hot for tile values
-            // NOTE: If this ever gets close to 131072, revisit this
-            memset(&game->observations[base_idx + 2], 0, 16 * sizeof(char));
-            if (grid_val > 0 && grid_val <= 16) {
-                game->observations[base_idx + 1 + grid_val] = 1;
-            }
+            game->observations[i * SIZE + j] = game->grid[i][j];
         }
     }
 }
