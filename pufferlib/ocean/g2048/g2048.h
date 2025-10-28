@@ -5,7 +5,9 @@
 #include <math.h>
 #include <string.h>
 #include "raylib.h"
-#define max(a, b) (((a) > (b)) ? (a) : (b))
+
+static inline int min(int a, int b) { return a < b ? a : b; }
+static inline int max(int a, int b) { return a > b ? a : b; }
 
 #define SIZE 4
 #define EMPTY 0
@@ -13,7 +15,7 @@
 #define DOWN 2
 #define LEFT 3
 #define RIGHT 4
-#define BASE_MAX_TICKS 2000
+#define BASE_MAX_TICKS 1000
 
 // Precomputed constants
 #define REWARD_MULTIPLIER 0.0625f
@@ -44,6 +46,10 @@ typedef struct {
     int* actions;                   // Required
     float* rewards;                 // Required
     unsigned char* terminals;       // Required
+
+    float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
+    bool is_scaffolding_episode;
+
     int score;
     int tick;
     unsigned char grid[SIZE][SIZE];
@@ -121,7 +127,8 @@ static inline void update_observations(Game* game) {
             // Features 3-18: One-hot for tile values
             // NOTE: If this ever gets close to 131072, revisit this
             memset(&game->observations[base_idx + 2], 0, 16 * sizeof(char));
-            if (grid_val > 0 && grid_val <= 16) {
+            if (grid_val > 0) {
+                grid_val = min(grid_val, 16);
                 game->observations[base_idx + 1 + grid_val] = 1;
             }
         }
@@ -140,6 +147,9 @@ static inline void update_empty_count(Game* game) {
 }
 
 void add_log(Game* game) {
+    // Scaffolding runs will distort stats, so skip logging
+    if (game->is_scaffolding_episode) return;
+
     unsigned char s = get_max_tile(game);
     game->log.score += (float)(1 << s);
     game->log.perf += (float)(1 << s) / OBSERVED_MAX_TILE;
@@ -166,7 +176,10 @@ void c_reset(Game* game) {
     game->max_episode_ticks = BASE_MAX_TICKS;
     
     if (game->terminals) game->terminals[0] = 0;
-    
+
+    // Higher tiles are spawned in scaffolding episodes
+    game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
+
     // Add two random tiles at the start - optimized version
     for (int added = 0; added < 2; ) {
         int pos = rand() % (SIZE * SIZE);
@@ -203,8 +216,18 @@ void add_random_tile(Game* game) {
     if (chosen_pos >= 0) {
         int i = chosen_pos / SIZE;
         int j = chosen_pos % SIZE;
-        // Implement the 90% 2, 10% 4 rule
-        game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+
+        unsigned char new_tile = 0;
+        if (game->is_scaffolding_episode) {
+            int max_tile = (int)get_max_tile(game);
+            // Scaffolding: spawn tiles up to max tile (or 2^17...)
+            new_tile = min(17, (rand() % max(1, max_tile)) + 1);
+        } else {
+            // Normal: Implement the 90% 2, 10% 4 rule
+            new_tile = (rand() % 10 == 0) ? 2 : 1;
+        }
+
+        game->grid[i][j] = new_tile;
         game->empty_count--;
         game->grid_changed = true;
     }
@@ -341,9 +364,11 @@ void c_step(Game* game) {
         update_empty_count(game); // Update after adding tile
         update_observations(game); // Observations only change if the grid changes
 
-        // This is to limit infinite invalid moves during eval
-        // Don't need to be tight. Don't need to show to user?
-        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
+        if (!game->is_scaffolding_episode) {
+            // This is to limit infinite invalid moves during eval
+            // Don't need to be tight. Don't need to show to user?
+            game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
+        }
 
     } else {
         reward = INVALID_MOVE_PENALTY;
