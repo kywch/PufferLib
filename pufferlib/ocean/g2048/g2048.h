@@ -106,6 +106,21 @@ static inline unsigned char get_max_tile(Game* game) {
     return max_tile;
 }
 
+static inline unsigned char get_min_tile(Game* game) {
+    unsigned char min_tile = 0;
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            unsigned char current_tile = game->grid[i][j];
+            if (current_tile != EMPTY) {
+                if (min_tile == 0 || current_tile < min_tile) {
+                    min_tile = current_tile;
+                }
+            }
+        }
+    }
+    return min_tile;
+}
+
 // Inline function for updating observations (avoid function call overhead)
 static inline void update_observations(Game* game) {
     // Observation: 4x4 grid, 18 features per cell
@@ -222,6 +237,12 @@ void add_random_tile(Game* game) {
             int max_tile = (int)get_max_tile(game);
             // Scaffolding: spawn tiles up to max tile (or 2^17...)
             new_tile = min(17, (rand() % max(1, max_tile)) + 1);
+            
+            // Some ideas to try later
+            // int min_tile = (int)get_min_tile(game);
+            // new_tile = (game->tick % 80 == 0) ? min(16, max_tile) : min(min_tile, max(max_tile - 7, 1));
+            // new_tile = min(min_tile, max(max_tile - 6, 1));
+
         } else {
             // Normal: Implement the 90% 2, 10% 4 rule
             new_tile = (rand() % 10 == 0) ? 2 : 1;

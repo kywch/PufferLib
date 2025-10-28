@@ -985,11 +985,11 @@ class G2048(nn.Module):
 
         num_obs = np.prod(env.single_observation_space.shape)
         self.encoder = torch.nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(num_obs, 256)),
+            pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
             nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(256, 128)),
+            pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
             nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(128, hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
             nn.GELU(),
         )
             
