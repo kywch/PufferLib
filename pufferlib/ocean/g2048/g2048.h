@@ -178,9 +178,9 @@ void c_reset(Game* game) {
     if (game->terminals) game->terminals[0] = 0;
 
     // Higher tiles are spawned in scaffolding episodes
-    // game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
+    game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     // NOTE: scaffolding did not work well, so not using it. Leaving it as a reference.
-    game->is_scaffolding_episode = false;
+    // game->is_scaffolding_episode = false;
 
     // Add two random tiles at the start - optimized version
     for (int added = 0; added < 2; ) {
@@ -188,7 +188,14 @@ void c_reset(Game* game) {
         int i = pos / SIZE;
         int j = pos % SIZE;
         if (game->grid[i][j] == EMPTY) {
-            game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+            if (game->is_scaffolding_episode) {
+                // Spawn one high tiles from 8192, 16384, 32768, 65536
+                // Having high tiles saves moves to get there, allowing agents to experience it faster
+                game->grid[i][j] = (rand() % 4) + 13;
+                added = 3;  // Hack to spawn only one tile
+            } else {
+                game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+            }
             added++;
             game->empty_count--;
         }
@@ -218,18 +225,8 @@ void add_random_tile(Game* game) {
     if (chosen_pos >= 0) {
         int i = chosen_pos / SIZE;
         int j = chosen_pos % SIZE;
-
-        unsigned char new_tile = 0;
-        if (game->is_scaffolding_episode) {
-            int max_tile = (int)get_max_tile(game);
-            // Scaffolding: spawn tiles up to max tile (or 2^17...)
-            new_tile = min(17, (rand() % max(1, max_tile)) + 1);
-        } else {
-            // Normal: Implement the 90% 2, 10% 4 rule
-            new_tile = (rand() % 10 == 0) ? 2 : 1;
-        }
-
-        game->grid[i][j] = new_tile;
+        // Implement the 90% 2, 10% 4 rule
+        game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
         game->empty_count--;
         game->grid_changed = true;
     }
@@ -366,11 +363,9 @@ void c_step(Game* game) {
         update_empty_count(game); // Update after adding tile
         update_observations(game); // Observations only change if the grid changes
 
-        if (!game->is_scaffolding_episode) {
-            // This is to limit infinite invalid moves during eval
-            // Don't need to be tight. Don't need to show to user?
-            game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
-        }
+        // This is to limit infinite invalid moves during eval
+        // Don't need to be tight. Don't need to show to user?
+        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
 
     } else {
         reward = INVALID_MOVE_PENALTY;

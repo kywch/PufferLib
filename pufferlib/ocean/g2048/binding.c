@@ -5,7 +5,7 @@
 
 // g2048.h does not have a 'size' field, so my_init can just return 0
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    // env->scaffolding_ratio = unpack(kwargs, "scaffolding_ratio");
+    env->scaffolding_ratio = unpack(kwargs, "scaffolding_ratio");
     return 0;
 }
 
