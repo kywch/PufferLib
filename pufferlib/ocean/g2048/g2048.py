@@ -15,13 +15,13 @@ class G2048(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
-        self.scaffolding_ratio = scaffolding_ratio
+        # self.scaffolding_ratio = scaffolding_ratio
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed,
-            scaffolding_ratio = self.scaffolding_ratio
+            # scaffolding_ratio = self.scaffolding_ratio
         )
 
     def reset(self, seed=0):

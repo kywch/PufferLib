@@ -29,7 +29,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define NUM_FEATURES 18
 
 // To normalize perf from 0 to 1. Only used with perf.
-#define OBSERVED_MAX_TILE 4096.0f
+#define OBSERVED_MAX_TILE 16384.0f
 
 typedef struct {
     float perf;
@@ -106,21 +106,6 @@ static inline unsigned char get_max_tile(Game* game) {
     return max_tile;
 }
 
-static inline unsigned char get_min_tile(Game* game) {
-    unsigned char min_tile = 0;
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            unsigned char current_tile = game->grid[i][j];
-            if (current_tile != EMPTY) {
-                if (min_tile == 0 || current_tile < min_tile) {
-                    min_tile = current_tile;
-                }
-            }
-        }
-    }
-    return min_tile;
-}
-
 // Inline function for updating observations (avoid function call overhead)
 static inline void update_observations(Game* game) {
     // Observation: 4x4 grid, 18 features per cell
@@ -193,7 +178,9 @@ void c_reset(Game* game) {
     if (game->terminals) game->terminals[0] = 0;
 
     // Higher tiles are spawned in scaffolding episodes
-    game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
+    // game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
+    // NOTE: scaffolding did not work well, so not using it. Leaving it as a reference.
+    game->is_scaffolding_episode = false;
 
     // Add two random tiles at the start - optimized version
     for (int added = 0; added < 2; ) {
@@ -237,12 +224,6 @@ void add_random_tile(Game* game) {
             int max_tile = (int)get_max_tile(game);
             // Scaffolding: spawn tiles up to max tile (or 2^17...)
             new_tile = min(17, (rand() % max(1, max_tile)) + 1);
-            
-            // Some ideas to try later
-            // int min_tile = (int)get_min_tile(game);
-            // new_tile = (game->tick % 80 == 0) ? min(16, max_tile) : min(min_tile, max(max_tile - 7, 1));
-            // new_tile = min(min_tile, max(max_tile - 6, 1));
-
         } else {
             // Normal: Implement the 90% 2, 10% 4 rule
             new_tile = (rand() % 10 == 0) ? 2 : 1;
@@ -413,6 +394,26 @@ void c_step(Game* game) {
         c_reset(game);
     }
 }
+
+// Stepping for eval only, no reward, no reset
+void step_without_reset(Game* game) {
+    float score_add = 0.0f;
+    float reward = 0.0f;
+    bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
+    game->tick++;
+
+    if (did_move) {
+        game->moves_made++;
+        add_random_tile(game);
+        game->score += score_add;
+        update_empty_count(game); // Update after adding tile
+        update_observations(game); // Observations only change if the grid changes
+    }
+
+    bool game_over = is_game_over(game);
+    game->terminals[0] = (game_over) ? 1 : 0;
+}
+
 
 // Rendering optimizations
 void c_render(Game* game) {
