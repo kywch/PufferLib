@@ -914,6 +914,10 @@ class G2048(nn.Module):
             nn.GELU(),
             pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
             nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(256, 256)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(256, 256)),
+            nn.GELU(),
             pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
             nn.GELU(),
         )
