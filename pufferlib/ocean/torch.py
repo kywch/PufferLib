@@ -923,10 +923,16 @@ class G2048(nn.Module):
         )
             
         num_atns = env.single_action_space.n
-        self.decoder = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, num_atns), std=0.01)
-        self.value = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, 1), std=1)
+        self.decoder = torch.nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, num_atns), std=0.01),
+        )
+        self.value = torch.nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1.0),
+        )
 
     def forward_eval(self, observations, state=None):
         hidden = self.encode_observations(observations, state=state)
