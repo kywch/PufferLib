@@ -15,5 +15,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "merge_score", log->merge_score);
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
+    assign_to_dict(dict, "snake_reward", log->snake_reward);
     return 0;
 }

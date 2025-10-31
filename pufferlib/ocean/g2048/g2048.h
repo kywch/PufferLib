@@ -21,7 +21,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define MERGE_REWARD_WEIGHT 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
-#define MONOTONICITY_REWARD_WEIGHT 0.00001f
+#define SNAKE_REWARD_WEIGHT 0.0002f
 #define POTENTIAL_MERGE_WEIGHT 0.001f
 
 // Features: 18 per cell
@@ -39,6 +39,7 @@ typedef struct {
     float merge_score;
     float episode_return;
     float episode_length;
+    float snake_reward;
     float n;
 } Log;
 
@@ -57,6 +58,7 @@ typedef struct {
     unsigned char grid[SIZE][SIZE];
     unsigned char max_tile;
     float episode_reward;           // Accumulate episode reward
+    float snake_reward;
     int moves_made;
     int max_episode_ticks;          // Dynamic max_ticks based on score
 
@@ -72,19 +74,24 @@ const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_RED = (Color){187, 0, 0, 255};
 const Color PUFF_CYAN = (Color){0, 187, 187, 255};
 
-static Color tile_colors[12] = {
+static Color tile_colors[17] = {
     {6, 24, 24, 255}, // Empty/background
     {187, 187, 187, 255}, // 2
     {170, 187, 187, 255}, // 4
     {150, 187, 187, 255}, // 8
     {130, 187, 187, 255},  // 16
     {110, 187, 187, 255},  // 32
-    {90, 187, 187, 255},   // 64
-    {70, 187, 187, 255}, // 128
-    {50, 187, 187, 255},  // 256
-    {30, 187, 187, 255},  // 512
-    {10, 187, 187, 255},  // 1024
-    {0, 187, 187, 255}   // 2048+
+    {90, 187, 187, 255},   // 64 (Getting more cyan)
+    {70, 187, 187, 255},   // 128
+    {50, 187, 187, 255},   // 256
+    {30, 187, 187, 255},   // 512
+    {0, 187, 187, 255},    // 1024 (PUFF_CYAN)
+    {0, 150, 187, 255},    // 2048
+    {0, 110, 187, 255},    // 4096
+    {0, 70, 187, 255},     // 8192
+    {187, 0, 0, 255},      // 16384 (PUFF_RED)
+    {204, 173, 17, 255},   // 32768 (Gold)
+    {6, 24, 24, 255},      // 65536+ (Invisible)
 };
 
 // --- Logging ---
@@ -134,6 +141,7 @@ void add_log(Game* game) {
     game->log.merge_score += (float)game->score;
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
+    game->log.snake_reward += game->snake_reward;
     game->log.n += 1;
 }
 
@@ -153,6 +161,7 @@ void c_reset(Game* game) {
     game->moves_made = 0;
     game->max_episode_ticks = BASE_MAX_TICKS;
     game->max_tile = 0;
+    game->snake_reward = 0;
     
     if (game->terminals) game->terminals[0] = 0;
 
@@ -333,8 +342,8 @@ bool is_game_over(Game* game) {
 static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     int empty_count = 0;
     unsigned char max_tile = 0;
-    float monotonicity_score = 0.0f;
     int potential_merges = 0;
+    float monotonicity_score = 0.0f;
     
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
@@ -343,35 +352,35 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
             // Update empty count and max tile
             if (val == EMPTY) empty_count++;
             if (val > max_tile) max_tile = val;
-            
-            // Check horizontal monotonicity (left→right decreasing)
-            if (j < SIZE - 1) {
-                unsigned char next_row_val = game->grid[i][j+1];
-                
-                // Reward decreasing tiles left→right
-                if (val != EMPTY && next_row_val != EMPTY && val > next_row_val) {
-                    monotonicity_score += val * val;
+
+            // Count potential merges
+            if (i < SIZE - 1 && val != EMPTY && val == game->grid[i+1][j]) potential_merges++;
+            if (j < SIZE - 1 && val != EMPTY && val == game->grid[i][j+1]) potential_merges++;
+        }
+    }
+
+    // Monotonicity reward: look for the snake pattern, only when the max tile is at top left
+    bool max_in_corner = (game->grid[0][0] == max_tile);
+    if (max_in_corner) {
+        monotonicity_score += max_tile * max_tile;
+
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < SIZE; j++) {
+                unsigned char val = game->grid[i][j];
+
+                // Check horizontal monotonicity (snake pattern) for top two rows only
+                if (j < SIZE - 1) {
+                    unsigned char next_col = game->grid[i][j+1];
+                    if (val != EMPTY && next_col != EMPTY) {
+                        // Row 0: Reward decreasing left to right, e.g., 8-7-6-5
+                        if (i == 0 && val > next_col) monotonicity_score += next_col * next_col;
+                        // Row 1: Reward increasing left to right, e.g., 1-2-3-4
+                        else if (i == 1 && val < next_col) monotonicity_score += val * val;
+                    }
                 }
-                
-                // Count potential merges
-                if (val != EMPTY && val == next_row_val) {
-                    potential_merges++;
-                }
-            }
-            
-            // Check vertical monotonicity (top→down decreasing)
-            if (i < SIZE - 1) {
-                unsigned char next_col_val = game->grid[i+1][j];
-                
-                // Reward decreasing tiles top→down
-                if (val != EMPTY && next_col_val != EMPTY && val > next_col_val) {
-                    monotonicity_score += val * val;
-                }
-                
-                // Count potential merges
-                if (val != EMPTY && val == next_col_val) {
-                    potential_merges++;
-                }
+                // Vertical monotonicity
+                unsigned char next_row = game->grid[i+1][j];
+                if (val != EMPTY && next_row != EMPTY && val > next_row) monotonicity_score += val * val;
             }
         }
     }
@@ -380,9 +389,10 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     game->max_tile = max_tile;
     
     float merge_reward = (float)potential_merges * POTENTIAL_MERGE_WEIGHT;
-    float monotonicity_reward = monotonicity_score * MONOTONICITY_REWARD_WEIGHT;
+    float monotonicity_reward = monotonicity_score * SNAKE_REWARD_WEIGHT;
+    game->snake_reward += monotonicity_reward;
     
-    return merge_reward + monotonicity_reward;  // Both are positive rewards now!
+    return merge_reward + monotonicity_reward;
 }
 
 void c_step(Game* game) {
@@ -401,7 +411,7 @@ void c_step(Game* game) {
         update_observations(game); // Observations only change if the grid changes
 
         // This is to limit infinite invalid moves during eval
-        // Don't need to be tight. Don't need to show to user?
+        // Don't need to be tight. Don't need to show to human player.
         game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
 
     } else {
@@ -473,9 +483,8 @@ void c_render(Game* game) {
             int val = game->grid[i][j];
             
             // Use precomputed colors
-            Color color = (val == 0) ? tile_colors[0] : 
-                         (val <= 11) ? tile_colors[val] : 
-                         (Color){60, 60, 60, 255};
+            int color_idx = min(val, 16); // Cap at the max index of our color array
+            Color color = tile_colors[color_idx];
             
             DrawRectangle(j * px, i * px, px - 5, px - 5, color);
             
@@ -483,11 +492,20 @@ void c_render(Game* game) {
                 int display_val = 1 << val; // Power of 2
                 // Pre-format text to avoid repeated formatting
                 snprintf(score_text, sizeof(score_text), "%d", display_val);
-                if (display_val < 1000) {
-                    DrawText(score_text, j * px + 30, i * px + 40, 32, PUFF_WHITE);
-                } else {
-                    DrawText(score_text, j * px + 20, i * px + 40, 32, PUFF_WHITE);
+
+                int font_size = 32;
+                int x_offset = 20; // Default for 4-digit numbers
+                if (display_val < 10) x_offset = 40; // 1-digit
+                else if (display_val < 100) x_offset = 35; // 2-digit
+                else if (display_val < 1000) x_offset = 25; // 3-digit
+                else if (display_val < 10000) x_offset = 15; // 4-digit
+                else if (display_val < 100000) x_offset = 5; // 5-digit
+                else {
+                    font_size = 24;
+                    x_offset = 5;
                 }
+
+                DrawText(score_text, j * px + x_offset, i * px + 40, font_size, PUFF_WHITE);
             }
         }
     }
