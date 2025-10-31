@@ -17,10 +17,12 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define RIGHT 4
 #define BASE_MAX_TICKS 1000
 
-// Precomputed constants
-#define REWARD_MULTIPLIER 0.0625f
+// These work well
+#define MERGE_REWARD_WEIGHT 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
+#define MONOTONICITY_REWARD_WEIGHT 0.00001f
+#define POTENTIAL_MERGE_WEIGHT 0.001f
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -53,10 +55,11 @@ typedef struct {
     int score;
     int tick;
     unsigned char grid[SIZE][SIZE];
+    unsigned char max_tile;
     float episode_reward;           // Accumulate episode reward
     int moves_made;
     int max_episode_ticks;          // Dynamic max_ticks based on score
-    
+
     // Cached values to avoid recomputation
     int empty_count;
     bool game_over_cached;
@@ -93,19 +96,6 @@ void c_step(Game* env);
 void c_render(Game* env);
 void c_close(Game* env);
 
-static inline unsigned char get_max_tile(Game* game) {
-    unsigned char max_tile = 0;
-    // Unroll loop for better performance
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (game->grid[i][j] > max_tile) {
-                max_tile = game->grid[i][j];
-            }
-        }
-    }
-    return max_tile;
-}
-
 // Inline function for updating observations (avoid function call overhead)
 static inline void update_observations(Game* game) {
     // Observation: 4x4 grid, 18 features per cell
@@ -135,24 +125,12 @@ static inline void update_observations(Game* game) {
     }
 }
 
-// Cache empty cell count during grid operations
-static inline void update_empty_count(Game* game) {
-    int count = 0;
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (game->grid[i][j] == EMPTY) count++;
-        }
-    }
-    game->empty_count = count;
-}
-
 void add_log(Game* game) {
     // Scaffolding runs will distort stats, so skip logging
     if (game->is_scaffolding_episode) return;
 
-    unsigned char s = get_max_tile(game);
-    game->log.score += (float)(1 << s);
-    game->log.perf += (float)(1 << s) / OBSERVED_MAX_TILE;
+    game->log.score += (float)(1 << game->max_tile);
+    game->log.perf += (float)(1 << game->max_tile) / OBSERVED_MAX_TILE;
     game->log.merge_score += (float)game->score;
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
@@ -174,13 +152,12 @@ void c_reset(Game* game) {
     game->grid_changed = true;
     game->moves_made = 0;
     game->max_episode_ticks = BASE_MAX_TICKS;
+    game->max_tile = 0;
     
     if (game->terminals) game->terminals[0] = 0;
 
     // Higher tiles are spawned in scaffolding episodes
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
-    // NOTE: scaffolding did not work well, so not using it. Leaving it as a reference.
-    // game->is_scaffolding_episode = false;
 
     // Add two random tiles at the start - optimized version
     for (int added = 0; added < 2; ) {
@@ -192,6 +169,8 @@ void c_reset(Game* game) {
                 // Spawn one high tiles from 8192, 16384, 32768, 65536
                 // Having high tiles saves moves to get there, allowing agents to experience it faster
                 game->grid[i][j] = (rand() % 4) + 13;
+
+                // TODO: experiment with two high tiles? didn't work well initially, but ...
                 added = 3;  // Hack to spawn only one tile
             } else {
                 game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
@@ -253,7 +232,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += ((float)row[i]) * REWARD_MULTIPLIER;
+            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -350,6 +329,62 @@ bool is_game_over(Game* game) {
     return true;
 }
 
+// Combined grid stats and heuristic calculation for performance
+static inline float update_stats_and_get_heuristic_rewards(Game* game) {
+    int empty_count = 0;
+    unsigned char max_tile = 0;
+    float monotonicity_score = 0.0f;
+    int potential_merges = 0;
+    
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            unsigned char val = game->grid[i][j];
+            
+            // Update empty count and max tile
+            if (val == EMPTY) empty_count++;
+            if (val > max_tile) max_tile = val;
+            
+            // Check horizontal monotonicity (left→right decreasing)
+            if (j < SIZE - 1) {
+                unsigned char next_row_val = game->grid[i][j+1];
+                
+                // Reward decreasing tiles left→right
+                if (val != EMPTY && next_row_val != EMPTY && val > next_row_val) {
+                    monotonicity_score += val * val;
+                }
+                
+                // Count potential merges
+                if (val != EMPTY && val == next_row_val) {
+                    potential_merges++;
+                }
+            }
+            
+            // Check vertical monotonicity (top→down decreasing)
+            if (i < SIZE - 1) {
+                unsigned char next_col_val = game->grid[i+1][j];
+                
+                // Reward decreasing tiles top→down
+                if (val != EMPTY && next_col_val != EMPTY && val > next_col_val) {
+                    monotonicity_score += val * val;
+                }
+                
+                // Count potential merges
+                if (val != EMPTY && val == next_col_val) {
+                    potential_merges++;
+                }
+            }
+        }
+    }
+    
+    game->empty_count = empty_count;
+    game->max_tile = max_tile;
+    
+    float merge_reward = (float)potential_merges * POTENTIAL_MERGE_WEIGHT;
+    float monotonicity_reward = monotonicity_score * MONOTONICITY_REWARD_WEIGHT;
+    
+    return merge_reward + monotonicity_reward;  // Both are positive rewards now!
+}
+
 void c_step(Game* game) {
     float reward = 0.0f;
     float score_add = 0.0f;
@@ -360,7 +395,9 @@ void c_step(Game* game) {
         game->moves_made++;
         add_random_tile(game);
         game->score += score_add;
-        update_empty_count(game); // Update after adding tile
+
+        // Add heuristic rewards/penalties and update grid stats
+        reward += update_stats_and_get_heuristic_rewards(game);
         update_observations(game); // Observations only change if the grid changes
 
         // This is to limit infinite invalid moves during eval
@@ -401,7 +438,7 @@ void step_without_reset(Game* game) {
         game->moves_made++;
         add_random_tile(game);
         game->score += score_add;
-        update_empty_count(game); // Update after adding tile
+        update_stats_and_get_heuristic_rewards(game); // The reward is ignored.
         update_observations(game); // Observations only change if the grid changes
     }
 
