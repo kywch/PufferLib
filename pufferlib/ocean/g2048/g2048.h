@@ -31,7 +31,8 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define NUM_FEATURES 18
 
 // To normalize perf from 0 to 1. Only used with perf.
-#define OBSERVED_MAX_TILE 16384.0f
+// SOTA is ~0.86 (72% of reaching 32768 tile): https://arxiv.org/pdf/2212.11087
+#define OBSERVED_MAX_TILE 32768.0f
 
 typedef struct {
     float perf;
@@ -499,13 +500,13 @@ void c_render(Game* game) {
                 else if (display_val < 100) x_offset = 35; // 2-digit
                 else if (display_val < 1000) x_offset = 25; // 3-digit
                 else if (display_val < 10000) x_offset = 15; // 4-digit
-                else if (display_val < 100000) x_offset = 5; // 5-digit
+                else if (display_val < 100000) x_offset = 2; // 5-digit
                 else {
                     font_size = 24;
                     x_offset = 5;
                 }
 
-                DrawText(score_text, j * px + x_offset, i * px + 40, font_size, PUFF_WHITE);
+                DrawText(score_text, j * px + x_offset, i * px + 34, font_size, PUFF_WHITE);
             }
         }
     }
