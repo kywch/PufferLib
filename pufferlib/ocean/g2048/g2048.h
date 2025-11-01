@@ -95,6 +95,11 @@ static Color tile_colors[17] = {
     {6, 24, 24, 255},      // 65536+ (Invisible)
 };
 
+// Precomputed pow(x, 1.5) lookup table for x in [0, 19] to avoid expensive pow() calls.
+static const unsigned char pow_1_5_lookup[20] = {
+    0, 1, 2, 5, 8, 11, 14, 18, 22, 27, 31, 36, 41, 46, 52, 57, 64, 69, 75, 81
+};
+
 // --- Logging ---
 void add_log(Game* game);
 
@@ -110,21 +115,21 @@ static inline void update_observations(Game* game) {
     // 1. Normalized tile value (current_val / max_val)
     // 2. One-hot for empty (1 if empty, 0 if occupied)
     // 3. One-hot for tile values 2^1 to 2^16 (16 features)
-    
+
+    memset(game->observations, 0, SIZE * SIZE * NUM_FEATURES * sizeof(unsigned char));
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
             int base_idx = (i * SIZE + j) * NUM_FEATURES;
             unsigned char grid_val = game->grid[i][j];
 
             // Feature 1: The original tile values ** 1.5, to make a bit superlinear within uint8
-            game->observations[base_idx] = (unsigned char)pow((float)grid_val, 1.5f);
+            game->observations[base_idx] = pow_1_5_lookup[grid_val];
 
             // Feature 2: One-hot for empty
             game->observations[base_idx + 1] = (grid_val == EMPTY) ? 1 : 0;
 
             // Features 3-18: One-hot for tile values
             // NOTE: If this ever gets close to 131072, revisit this
-            memset(&game->observations[base_idx + 2], 0, 16 * sizeof(char));
             if (grid_val > 0) {
                 grid_val = min(grid_val, 16);
                 game->observations[base_idx + 1 + grid_val] = 1;
