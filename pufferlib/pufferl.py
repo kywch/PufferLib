@@ -1079,6 +1079,8 @@ def sweep(args=None, env_name=None):
             sweep.observe(args, s, c, is_failure=True)
 
         for score, cost, timestep in zip(scores, costs, timesteps):
+            # NOTE: When annealing LR, the results will be bit different when using the same train args
+            # Nonetheless, the data points from the first run would be helpful. Revisit this when necessary.
             args['train']['total_timesteps'] = timestep
             sweep.observe(args, score, cost)
 
