@@ -21,7 +21,6 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define MERGE_REWARD_WEIGHT 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
-#define SNAKE_REWARD_WEIGHT 0.0002f
 #define POTENTIAL_MERGE_WEIGHT 0.001f
 
 // Features: 18 per cell
@@ -53,6 +52,7 @@ typedef struct {
 
     float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
     bool is_scaffolding_episode;
+    float snake_reward_weight;
 
     int score;
     int tick;
@@ -390,7 +390,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     game->max_tile = max_tile;
     
     float merge_reward = (float)potential_merges * POTENTIAL_MERGE_WEIGHT;
-    float monotonicity_reward = monotonicity_score * SNAKE_REWARD_WEIGHT;
+    float monotonicity_reward = monotonicity_score * game->snake_reward_weight;
     game->snake_reward += monotonicity_reward;
     
     return merge_reward + monotonicity_reward;

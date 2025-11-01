@@ -6,6 +6,7 @@
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->scaffolding_ratio = unpack(kwargs, "scaffolding_ratio");
     env->scaffolding_ratio = max(min(env->scaffolding_ratio, 0.9f), 0.0f);
+    env->snake_reward_weight = unpack(kwargs, "snake_reward_weight");
     return 0;
 }
 
