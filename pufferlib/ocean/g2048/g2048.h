@@ -40,6 +40,9 @@ typedef struct {
     float episode_return;
     float episode_length;
     float snake_reward;
+    float lifetime_max_tile;
+    float reached_32768;
+    float reached_65536_ever;
     float n;
 } Log;
 
@@ -57,7 +60,8 @@ typedef struct {
     int score;
     int tick;
     unsigned char grid[SIZE][SIZE];
-    unsigned char max_tile;
+    unsigned char lifetime_max_tile;
+    unsigned char max_tile;         // Episode max tile
     float episode_reward;           // Accumulate episode reward
     float snake_reward;
     int moves_made;
@@ -142,12 +146,20 @@ void add_log(Game* game) {
     // Scaffolding runs will distort stats, so skip logging
     if (game->is_scaffolding_episode) return;
 
+    // Update the lifetime best
+    if (game->max_tile > game->lifetime_max_tile) {
+        game->lifetime_max_tile = game->max_tile;
+    }
+    
     game->log.score += (float)(1 << game->max_tile);
     game->log.perf += (float)(1 << game->max_tile) / OBSERVED_MAX_TILE;
     game->log.merge_score += (float)game->score;
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
     game->log.snake_reward += game->snake_reward;
+    game->log.lifetime_max_tile += (float)(1 << game->lifetime_max_tile);
+    game->log.reached_32768 += (game->max_tile >= 15);
+    game->log.reached_65536_ever += (game->lifetime_max_tile >= 16);
     game->log.n += 1;
 }
 
@@ -172,29 +184,40 @@ void c_reset(Game* game) {
     if (game->terminals) game->terminals[0] = 0;
 
     // Higher tiles are spawned in scaffolding episodes
+    // Having high tiles saves moves to get there, allowing agents to experience it faster
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
-
-    // Add two random tiles at the start - optimized version
-    for (int added = 0; added < 2; ) {
-        int pos = rand() % (SIZE * SIZE);
-        int i = pos / SIZE;
-        int j = pos % SIZE;
-        if (game->grid[i][j] == EMPTY) {
-            if (game->is_scaffolding_episode) {
-                // Spawn one high tiles from 8192, 16384, 32768, 65536
-                // Having high tiles saves moves to get there, allowing agents to experience it faster
-                game->grid[i][j] = (rand() % 4) + 13;
-
-                // TODO: experiment with two high tiles? didn't work well initially, but ...
-                added = 3;  // Hack to spawn only one tile
-            } else {
-                game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+    if (game->is_scaffolding_episode) {
+        int curriculum = rand() % 5;
+        if (curriculum == 0 && game->lifetime_max_tile >= 14) {
+            // Fill the top row in decreasing order from the current max
+            for (int j = 0; j < SIZE; j++) {
+                // Fill the top row like {15, 14, 13, 12} or {14, 13, 12, 11}
+                game->grid[0][j] = game->lifetime_max_tile - j;
+                game->empty_count--;
             }
-            added++;
+        } else {
+            int pos = rand() % (SIZE * SIZE);
+            int i = pos / SIZE;
+            int j = pos % SIZE;
+            // Spawn one high tiles from 8192, 16384, 32768, 65536
+            game->grid[i][j] = max(12 + curriculum, game->lifetime_max_tile);            
             game->empty_count--;
         }
+
+    // Add two random tiles at the start - optimized version
+    } else {
+        for (int added = 0; added < 2; ) {
+            int pos = rand() % (SIZE * SIZE);
+            int i = pos / SIZE;
+            int j = pos % SIZE;
+            if (game->grid[i][j] == EMPTY) {
+                game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+                added++;
+                game->empty_count--;
+            }
+        }
     }
-    
+
     update_observations(game);
 }
 
