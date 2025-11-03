@@ -395,6 +395,8 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         int filled_count = 0;
 
         for (int i = 0; i < 3; i++) {
+            unsigned char row_min = 32;
+            unsigned char next_row_max = 0;
             for (int j = 0; j < SIZE; j++) {
                 unsigned char val = game->grid[i][j];
                 if (val != EMPTY) filled_count++;
@@ -412,9 +414,17 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                         else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 4;
                     }
                 }
-                // Vertical monotonicity
+
+                // Vertical monotonicity: give score after row scanning for min/max is done
+                if (val != EMPTY && val < row_min) row_min = val;
                 unsigned char next_row = game->grid[i+1][j];
+                if (next_row != EMPTY && next_row > next_row_max) next_row_max = next_row;
+                // Small column-level vertical reward
                 if (val != EMPTY && next_row != EMPTY && val > next_row) monotonicity_score += 3 * val;
+            }
+            // Large row-level vertical reward
+            if (row_min < 20 && next_row_max > 0 && row_min >= next_row_max) {
+                monotonicity_score += 4 * row_min * row_min;
             }
         }
     }
