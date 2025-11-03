@@ -414,7 +414,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                 }
                 // Vertical monotonicity
                 unsigned char next_row = game->grid[i+1][j];
-                if (val != EMPTY && next_row != EMPTY && val > next_row) monotonicity_score += val * val;
+                if (val != EMPTY && next_row != EMPTY && val > next_row) monotonicity_score += 3 * val;
             }
         }
     }
