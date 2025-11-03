@@ -370,7 +370,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     if (max_in_corner) {
         monotonicity_score += max_tile * max_tile;
 
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             for (int j = 0; j < SIZE; j++) {
                 unsigned char val = game->grid[i][j];
 
@@ -378,10 +378,12 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                 if (j < SIZE - 1) {
                     unsigned char next_col = game->grid[i][j+1];
                     if (val != EMPTY && next_col != EMPTY) {
-                        // Row 0: Reward decreasing left to right, e.g., 8-7-6-5
+                        // Row 0: Reward decreasing left to right, e.g., 12-11-10-9
                         if (i == 0 && val > next_col) monotonicity_score += next_col * next_col;
-                        // Row 1: Reward increasing left to right, e.g., 1-2-3-4
+                        // Row 1: Reward increasing left to right, e.g., 5-6-7-8
                         else if (i == 1 && val < next_col) monotonicity_score += val * val;
+                        // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
+                        else if (i == 2 && val > next_col) monotonicity_score += val * val;
                     }
                 }
                 // Vertical monotonicity
