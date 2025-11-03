@@ -369,10 +369,12 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     bool max_in_corner = (game->grid[0][0] == max_tile);
     if (max_in_corner) {
         monotonicity_score += max_tile * max_tile;
+        int filled_count = 0;
 
         for (int i = 0; i < 3; i++) {
             for (int j = 0; j < SIZE; j++) {
                 unsigned char val = game->grid[i][j];
+                if (val != EMPTY) filled_count++;
 
                 // Check horizontal monotonicity (snake pattern) for top two rows only
                 if (j < SIZE - 1) {
@@ -383,7 +385,8 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                         // Row 1: Reward increasing left to right, e.g., 5-6-7-8
                         else if (i == 1 && val < next_col) monotonicity_score += val * val;
                         // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
-                        else if (i == 2 && val > next_col) monotonicity_score += val * val;
+                        // Only when the max tile is high (16384+) and up 2 rows are filled, so the third row starts to matter
+                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 4;
                     }
                 }
                 // Vertical monotonicity
