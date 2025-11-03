@@ -42,7 +42,7 @@ typedef struct {
     float snake_reward;
     float lifetime_max_tile;
     float reached_32768;
-    float reached_65536_ever;
+    float reached_65536;
     float n;
 } Log;
 
@@ -159,7 +159,7 @@ void add_log(Game* game) {
     game->log.snake_reward += game->snake_reward;
     game->log.lifetime_max_tile += (float)(1 << game->lifetime_max_tile);
     game->log.reached_32768 += (game->max_tile >= 15);
-    game->log.reached_65536_ever += (game->lifetime_max_tile >= 16);
+    game->log.reached_65536 += (game->max_tile >= 16);
     game->log.n += 1;
 }
 

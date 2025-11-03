@@ -20,6 +20,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "snake_reward", log->snake_reward);
     assign_to_dict(dict, "lifetime_max_tile", log->lifetime_max_tile);
     assign_to_dict(dict, "reached_32768", log->reached_32768);
-    assign_to_dict(dict, "reached_65536_ever", log->reached_65536_ever);
+    assign_to_dict(dict, "reached_65536", log->reached_65536);
     return 0;
 }
