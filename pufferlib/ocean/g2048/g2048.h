@@ -188,7 +188,8 @@ void c_reset(Game* game) {
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
         int curriculum = rand() % 5;
-        if (curriculum == 0 && game->lifetime_max_tile >= 14) {
+        if ((curriculum == 0 && game->lifetime_max_tile >= 14) ||
+            (game->lifetime_max_tile >= 15 && curriculum < 3)) {
             // Fill the top row in decreasing order from the current max
             for (int j = 0; j < SIZE; j++) {
                 // Fill the top row like {15, 14, 13, 12} or {14, 13, 12, 11}
