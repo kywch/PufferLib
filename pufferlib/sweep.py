@@ -17,6 +17,7 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.priors import LogNormalPrior
 from scipy.stats.qmc import Sobol
 from scipy.spatial import KDTree
+from sklearn.linear_model import LogisticRegression
 
 EPSILON = 1e-6
 
@@ -459,6 +460,8 @@ class Protein:
 
         self.success_observations = []
         self.failure_observations = []
+        self.success_classifier = LogisticRegression()
+
         self.suggestion_idx = 0
         self.min_score, self.max_score = math.inf, -math.inf
         self.log_c_min, self.log_c_max = math.inf, -math.inf
@@ -671,11 +674,27 @@ class Protein:
         # NOTE: Tried upper confidence bounds, but it did more harm because gp was noisy
         score = gp_y_norm
 
+        # Predict success probability
+        p_success = np.ones_like(score)
+        if self.success_observations and self.failure_observations:
+            success_params = np.array([e['input'] for e in self.success_observations])
+            failure_params = np.array([e['input'] for e in self.failure_observations])
+            X_train = np.vstack([success_params, failure_params])
+            y_train = np.concatenate([
+                np.ones(len(success_params)),
+                np.zeros(len(failure_params))
+            ])
+            if len(np.unique(y_train)) > 1:
+                self.success_classifier.fit(X_train, y_train)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    p_success = self.success_classifier.predict_proba(suggestions)[:, 1]
+
         # Limit the cost
         max_c_mask = np.logical_and(gp_c < self.max_suggestion_cost,
                                     gp_log_c_norm < 1 + self.expansion_rate)
 
-        suggestion_scores = self.hyperparameters.optimize_direction * score * max_c_mask
+        suggestion_scores = self.hyperparameters.optimize_direction * score * max_c_mask * p_success
 
         if not self.maximize_score_mode:
             # Cost-aware search: balance score and cost
