@@ -671,14 +671,17 @@ class Protein:
         # NOTE: Tried upper confidence bounds, but it did more harm because gp was noisy
         score = gp_y_norm
 
-        suggestion_scores = self.hyperparameters.optimize_direction * score
-        
+        # Limit the cost
+        max_c_mask = np.logical_and(gp_c < self.max_suggestion_cost,
+                                    gp_log_c_norm < 1 + self.expansion_rate)
+
+        suggestion_scores = self.hyperparameters.optimize_direction * score * max_c_mask
+
         if not self.maximize_score_mode:
             # Cost-aware search: balance score and cost
-            max_c_mask = gp_c < self.max_suggestion_cost
             target = (1 + self.expansion_rate)*np.random.rand()
             weight = 1 - abs(target - gp_log_c_norm)
-            suggestion_scores *= max_c_mask * weight
+            suggestion_scores *= weight
 
         best_idx = np.argmax(suggestion_scores)
         info = dict(
