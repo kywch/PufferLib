@@ -96,7 +96,7 @@ def sweep(env_name, args):
 if __name__ == "__main__":
     import sys
 
-    env_name = sys.argv.pop(1) if len(sys.argv) > 1 else "puffer_pong"
+    env_name = sys.argv.pop(1) if len(sys.argv) > 1 else "puffer_breakout"
 
     # parser = None
     parser = pufferl.make_parser()
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     parser.add_argument('--gp-lr', type=float, default=None)
     # parser.add_argument('--use-gpu', action="store_true")
     # parser.add_argument('--prune-pareto', action="store_true")
-    # parser.add_argument('--ucb-beta', type=float, default=None)
+    parser.add_argument('--use-success-prob', action="store_true")
     args = pufferl.load_config(env_name, parser)
 
     # Use wandb
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     #     args["sweep"]["use_gpu"] = True
     # if args["prune_pareto"]:
     #     args["sweep_extra"]["prune_pareto"] = args["prune_pareto"]
-    # if args["ucb_beta"] is not None:
-    #     args["sweep_extra"]["ucb_beta"] = args["ucb_beta"]
+    if args["use_success_prob"] is not None:
+        args["sweep_extra"]["use_success_prob"] = args["use_success_prob"]
 
     sweep(env_name, args)

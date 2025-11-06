@@ -134,7 +134,7 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'maximize_score_mode'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'use_success_prob'):
             continue
 
         assert isinstance(param, dict)
@@ -240,8 +240,8 @@ class Hyperparameters:
         return idx
 
     def get_flat_idx(self, flat_key):
-        return list(self.flat_spaces.keys()).index(flat_key)
-
+        keys = list(self.flat_spaces.keys())
+        return keys.index(flat_key) if flat_key in keys else None
 
 def pareto_points(observations):
     if not observations:
@@ -442,7 +442,7 @@ class Protein:
             use_gpu = True,
             cost_param = "train/total_timesteps",
             prune_pareto = True,
-            maximize_score_mode = False,
+            use_success_prob = False,
         ):
         self.device = torch.device("cuda:0" if use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
@@ -456,11 +456,9 @@ class Protein:
         self.gp_learning_rate = gp_learning_rate
         self.optimizer_reset_frequency = optimizer_reset_frequency
         self.prune_pareto = prune_pareto
-        self.maximize_score_mode = maximize_score_mode
 
         self.success_observations = []
         self.failure_observations = []
-        self.success_classifier = LogisticRegression()
 
         self.suggestion_idx = 0
         self.min_score, self.max_score = math.inf, -math.inf
@@ -474,10 +472,15 @@ class Protein:
         # self.num_random_samples = 3 * points_per_run * self.hyperparameters.num
 
         self.cost_param_idx = self.hyperparameters.get_flat_idx(cost_param)
-        self.cost_random_suggestion = self.hyperparameters.search_centers[self.cost_param_idx]
+        self.cost_random_suggestion = None
+        if self.cost_param_idx is not None:
+            self.cost_random_suggestion = self.hyperparameters.search_centers[self.cost_param_idx]
 
         self.gp_max_obs = gp_max_obs  # train time bumps after 800?
         self.infer_batch_size = infer_batch_size
+
+        self.use_success_prob = use_success_prob
+        self.success_classifier = LogisticRegression()
 
         # Use 64 bit for GP regression
         with default_tensor_dtype(torch.float64):
@@ -594,8 +597,9 @@ class Protein:
             # Suggest the next point in the Sobol sequence
             zero_one = self.sobol.random(1)[0]
             suggestion = 2*zero_one - 1  # Scale from [0, 1) to [-1, 1)
-            cost_suggestion = self.cost_random_suggestion + 0.1 * np.random.randn()
-            suggestion[self.cost_param_idx] = np.clip(cost_suggestion, -1, 1)  # limit the cost
+            if self.cost_param_idx is not None:
+                cost_suggestion = self.cost_random_suggestion + 0.1 * np.random.randn()
+                suggestion[self.cost_param_idx] = np.clip(cost_suggestion, -1, 1)  # limit the cost
             return self.hyperparameters.to_dict(suggestion, fill), info
 
         elif self.resample_frequency and self.suggestion_idx % self.resample_frequency == 0:
@@ -612,18 +616,13 @@ class Protein:
             self.score_opt = torch.optim.Adam(self.gp_score.parameters(), lr=self.gp_learning_rate, amsgrad=True)
             self.cost_opt = torch.optim.Adam(self.gp_cost.parameters(), lr=self.gp_learning_rate, amsgrad=True)
        
-        if self.maximize_score_mode:
-            candidates = self.success_observations
-            num_sample = 1000
-        else:
-            # Cost-aware search mode
-            candidates, pareto_idxs = pareto_points(self.success_observations)
-            if self.prune_pareto:
-                candidates = prune_pareto_front(candidates)
-            num_sample = len(candidates)*self.suggestions_per_pareto
+        candidates, pareto_idxs = pareto_points(self.success_observations)
+        if self.prune_pareto:
+            candidates = prune_pareto_front(candidates)
 
         ### Sample suggestions
         search_centers = np.stack([e['input'] for e in candidates])
+        num_sample = len(candidates) * self.suggestions_per_pareto
         suggestions = self.hyperparameters.sample(num_sample, mu=search_centers)
 
         dedup_indices = self._filter_near_duplicates(suggestions)
@@ -671,12 +670,17 @@ class Protein:
         gp_log_c = gp_log_c_norm*(self.log_c_max - self.log_c_min) + self.log_c_min
         gp_c = np.exp(gp_log_c)
 
-        # NOTE: Tried upper confidence bounds, but it did more harm because gp was noisy
-        score = gp_y_norm
+        # Maximize score. (Tried upper confidence bounds, but it did more harm because gp was noisy)
+        suggestion_scores = self.hyperparameters.optimize_direction * gp_y_norm
 
-        # Predict success probability
-        p_success = np.ones_like(score)
-        if self.success_observations and self.failure_observations:
+        # Then, decide the budget for this session and favor closer suggestions
+        max_c_mask = gp_c < self.max_suggestion_cost
+        target = (1 + self.expansion_rate)*np.random.rand()
+        weight = 1 - abs(target - gp_log_c_norm)
+        suggestion_scores *= max_c_mask * weight
+
+        # Then, consider the prob of training success
+        if self.use_success_prob and self.success_observations and self.failure_observations:
             success_params = np.array([e['input'] for e in self.success_observations])
             failure_params = np.array([e['input'] for e in self.failure_observations])
             X_train = np.vstack([success_params, failure_params])
@@ -689,18 +693,7 @@ class Protein:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
                     p_success = self.success_classifier.predict_proba(suggestions)[:, 1]
-
-        # Limit the cost
-        max_c_mask = np.logical_and(gp_c < self.max_suggestion_cost,
-                                    gp_log_c_norm < 1 + self.expansion_rate)
-
-        suggestion_scores = self.hyperparameters.optimize_direction * score * max_c_mask * p_success
-
-        if not self.maximize_score_mode:
-            # Cost-aware search: balance score and cost
-            target = (1 + self.expansion_rate)*np.random.rand()
-            weight = 1 - abs(target - gp_log_c_norm)
-            suggestion_scores *= weight
+                suggestion_scores *= p_success
 
         best_idx = np.argmax(suggestion_scores)
         info = dict(
