@@ -22,6 +22,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
 #define POTENTIAL_MERGE_WEIGHT 0.001f
+#define CORNER_REWARD_WEIGHT 0.01f
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -389,6 +390,14 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         }
     }
 
+    // Corner reward: A simple nudge to keep the max tile in the top-left corner.
+    // When agents learn to put the max tile on the other corners,
+    // they miss out snake rew, and this does happen sometimes.
+    float corner_reward = 0.0f;
+    if (game->grid[0][0] == max_tile && max_tile > 4) {
+        corner_reward = CORNER_REWARD_WEIGHT;
+    }
+
     // Monotonicity reward: look for the snake pattern, only when the max tile is at top left
     bool max_in_corner = (game->grid[0][0] == max_tile);
     if (max_in_corner) {
@@ -437,7 +446,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     float monotonicity_reward = monotonicity_score * game->snake_reward_weight;
     game->snake_reward += monotonicity_reward;
     
-    return merge_reward + monotonicity_reward;
+    return merge_reward + monotonicity_reward + corner_reward;
 }
 
 void c_step(Game* game) {

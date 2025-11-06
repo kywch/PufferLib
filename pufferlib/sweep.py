@@ -133,7 +133,7 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'maximize_score_mode'):
             continue
 
         assert isinstance(param, dict)
@@ -441,6 +441,7 @@ class Protein:
             use_gpu = True,
             cost_param = "train/total_timesteps",
             prune_pareto = True,
+            maximize_score_mode = False,
         ):
         self.device = torch.device("cuda:0" if use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
@@ -454,6 +455,7 @@ class Protein:
         self.gp_learning_rate = gp_learning_rate
         self.optimizer_reset_frequency = optimizer_reset_frequency
         self.prune_pareto = prune_pareto
+        self.maximize_score_mode = maximize_score_mode
 
         self.success_observations = []
         self.failure_observations = []
@@ -607,15 +609,19 @@ class Protein:
             self.score_opt = torch.optim.Adam(self.gp_score.parameters(), lr=self.gp_learning_rate, amsgrad=True)
             self.cost_opt = torch.optim.Adam(self.gp_cost.parameters(), lr=self.gp_learning_rate, amsgrad=True)
        
-        candidates, pareto_idxs = pareto_points(self.success_observations)
-
-        if self.prune_pareto:
-            candidates = prune_pareto_front(candidates)
+        if self.maximize_score_mode:
+            candidates = self.success_observations
+            num_sample = 1000
+        else:
+            # Cost-aware search mode
+            candidates, pareto_idxs = pareto_points(self.success_observations)
+            if self.prune_pareto:
+                candidates = prune_pareto_front(candidates)
+            num_sample = len(candidates)*self.suggestions_per_pareto
 
         ### Sample suggestions
         search_centers = np.stack([e['input'] for e in candidates])
-        suggestions = self.hyperparameters.sample(
-            len(candidates)*self.suggestions_per_pareto, mu=search_centers)
+        suggestions = self.hyperparameters.sample(num_sample, mu=search_centers)
 
         dedup_indices = self._filter_near_duplicates(suggestions)
         suggestions = suggestions[dedup_indices]
@@ -662,16 +668,17 @@ class Protein:
         gp_log_c = gp_log_c_norm*(self.log_c_max - self.log_c_min) + self.log_c_min
         gp_c = np.exp(gp_log_c)
 
-        max_c_mask = gp_c < self.max_suggestion_cost
-
-        target = (1 + self.expansion_rate)*np.random.rand()
-        weight = 1 - abs(target - gp_log_c_norm)
-
         # NOTE: Tried upper confidence bounds, but it did more harm because gp was noisy
         score = gp_y_norm
 
-        suggestion_scores = self.hyperparameters.optimize_direction * max_c_mask * (
-                score * weight)
+        suggestion_scores = self.hyperparameters.optimize_direction * score
+        
+        if not self.maximize_score_mode:
+            # Cost-aware search: balance score and cost
+            max_c_mask = gp_c < self.max_suggestion_cost
+            target = (1 + self.expansion_rate)*np.random.rand()
+            weight = 1 - abs(target - gp_log_c_norm)
+            suggestion_scores *= max_c_mask * weight
 
         best_idx = np.argmax(suggestion_scores)
         info = dict(
