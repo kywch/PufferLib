@@ -737,7 +737,7 @@ class Protein:
                 return
 
         # Ignore obs that are below the minimum cost
-        if params[self.cost_param_idx] <= -1:
+        if self.cost_param_idx is not None and params[self.cost_param_idx] <= -1:
             return
 
         self.success_observations.append(new_observation)
