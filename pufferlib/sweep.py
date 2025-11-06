@@ -680,7 +680,7 @@ class Protein:
         suggestion_scores *= max_c_mask * weight
 
         # Then, consider the prob of training success
-        if self.use_success_prob and self.success_observations and self.failure_observations:
+        if self.use_success_prob and len(self.success_observations) > 9 and len(self.failure_observations) > 9:
             success_params = np.array([e['input'] for e in self.success_observations])
             failure_params = np.array([e['input'] for e in self.failure_observations])
             X_train = np.vstack([success_params, failure_params])
