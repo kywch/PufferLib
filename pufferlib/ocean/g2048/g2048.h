@@ -121,23 +121,26 @@ static inline void update_observations(Game* game) {
     // 2. One-hot for empty (1 if empty, 0 if occupied)
     // 3. One-hot for tile values 2^1 to 2^16 (16 features)
 
-    memset(game->observations, 0, SIZE * SIZE * NUM_FEATURES * sizeof(unsigned char));
+    int num_cell = SIZE * SIZE;
+    memset(game->observations, 0, num_cell * NUM_FEATURES * sizeof(unsigned char));
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
-            int base_idx = (i * SIZE + j) * NUM_FEATURES;
+            int feat1_idx = (i * SIZE + j);
+            int feat2_idx = num_cell + feat1_idx;
+            int feat3_idx = 2 * num_cell + 16 * feat1_idx;
             unsigned char grid_val = game->grid[i][j];
 
             // Feature 1: The original tile values ** 1.5, to make a bit superlinear within uint8
-            game->observations[base_idx] = pow_1_5_lookup[grid_val];
+            game->observations[feat1_idx] = pow_1_5_lookup[grid_val];
 
             // Feature 2: One-hot for empty
-            game->observations[base_idx + 1] = (grid_val == EMPTY) ? 1 : 0;
+            game->observations[feat2_idx] = (grid_val == EMPTY) ? 1 : 0;
 
             // Features 3-18: One-hot for tile values
             // NOTE: If this ever gets close to 131072, revisit this
             if (grid_val > 0) {
                 grid_val = min(grid_val, 16);
-                game->observations[base_idx + 1 + grid_val] = 1;
+                game->observations[feat3_idx + grid_val - 1] = 1;
             }
         }
     }

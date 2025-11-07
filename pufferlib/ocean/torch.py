@@ -940,8 +940,12 @@ class G2048(nn.Module):
 
     def encode_observations(self, observations, state=None):
         batch_size = observations.shape[0]
-        observations = observations.view(batch_size, -1)
-        return self.encoder(observations.float())
+        observations = observations.view(batch_size, -1).float()
+
+        # Scale the feat 1 (tile**1.5)
+        observations[:, :16] = observations[:, :16] / 100.0
+
+        return self.encoder(observations)
 
     def decode_actions(self, hidden):
         logits = self.decoder(hidden)
