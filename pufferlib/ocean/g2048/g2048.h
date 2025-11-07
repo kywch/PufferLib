@@ -18,7 +18,8 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define BASE_MAX_TICKS 1000
 
 // These work well
-#define MERGE_REWARD_WEIGHT 0.01f
+#define BASE_MERGE_REWARD 0.1f
+#define MERGE_BONUS_WEIGHT 0.01f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
 #define POTENTIAL_MERGE_WEIGHT 0.001f
@@ -276,7 +277,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += ((float)pow_1_5_lookup[row[i]]) * MERGE_REWARD_WEIGHT;
+            *reward += BASE_MERGE_REWARD + ((float)pow_1_5_lookup[row[i]]) * MERGE_BONUS_WEIGHT;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
