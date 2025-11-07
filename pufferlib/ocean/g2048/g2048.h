@@ -18,7 +18,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define BASE_MAX_TICKS 1000
 
 // These work well
-#define MERGE_REWARD_WEIGHT 0.02f
+#define MERGE_REWARD_WEIGHT 0.01f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
 #define POTENTIAL_MERGE_WEIGHT 0.001f
@@ -276,7 +276,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
+            *reward += ((float)pow_1_5_lookup[row[i]]) * MERGE_REWARD_WEIGHT;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -468,8 +468,8 @@ void c_step(Game* game) {
         // Add heuristic rewards/penalties and update grid stats
         reward += update_stats_and_get_heuristic_rewards(game);
 
-        // Huge reward for reaching tiles about 16k
-        if (game->max_tile > prev_max_tile && game->max_tile >= 14) reward += MILESTONE_REWARD_WEIGHT;
+        // Huge one-time reward for breaking records from 1024
+        if (game->max_tile > prev_max_tile && game->max_tile >= 10) reward += MILESTONE_REWARD_WEIGHT;
 
         update_observations(game); // Observations only change if the grid changes
         
