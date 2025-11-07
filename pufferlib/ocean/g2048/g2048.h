@@ -424,7 +424,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                         else if (i == 1 && val < next_col) monotonicity_score += pow_1_5_lookup[val];
                         // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
                         // Only when the max tile is high (16384+) and up 2 rows are filled, so the third row starts to matter
-                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += pow_1_5_lookup[val] * 4;
+                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 5;
                     }
                 }
 
