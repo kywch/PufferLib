@@ -134,7 +134,7 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'use_success_prob', 'num_random_samples'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'num_random_samples'):
             continue
 
         assert isinstance(param, dict)
@@ -442,7 +442,6 @@ class Protein:
             use_gpu = True,
             cost_param = "train/total_timesteps",
             prune_pareto = True,
-            use_success_prob = False,
         ):
         self.device = torch.device("cuda:0" if use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
@@ -479,8 +478,9 @@ class Protein:
         self.gp_max_obs = gp_max_obs  # train time bumps after 800?
         self.infer_batch_size = infer_batch_size
 
-        self.use_success_prob = use_success_prob
-        self.success_classifier = LogisticRegression()
+        # Probably useful only when downsample=1 and each run is expensive.
+        self.use_success_prob = sweep_config['downsample'] == 1
+        self.success_classifier = LogisticRegression(class_weight='balanced')
 
         # Use 64 bit for GP regression
         with default_tensor_dtype(torch.float64):
@@ -691,7 +691,8 @@ class Protein:
         weight = 1 - abs(target - gp_log_c_norm)
         suggestion_scores *= max_c_mask * weight
 
-        # Then, consider the prob of training success
+        # Then, consider the prob of training success, only when downsample = 1
+        # NOTE: Useful only in limited scenarios, where each data point is expensive. So turn it off by default.
         if self.use_success_prob and len(self.success_observations) > 9 and len(self.failure_observations) > 9:
             success_params = np.array([e['input'] for e in self.success_observations])
             failure_params = np.array([e['input'] for e in self.failure_observations])
