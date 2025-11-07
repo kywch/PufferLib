@@ -134,7 +134,7 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'use_success_prob'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'use_success_prob', 'num_random_samples'):
             continue
 
         assert isinstance(param, dict)
@@ -538,6 +538,14 @@ class Protein:
         self.log_c_min, self.log_c_max = log_c.min(), log_c.max()
 
         params = np.array([e['input'] for e in self.success_observations])
+
+        # When the data is scare, also use failed observations
+        if len(self.success_observations) < 100 and self.failure_observations:
+            # Give the min score for the failed obs
+            y = np.append(y, [self.min_score]*len(self.failure_observations))
+            c = np.append(c, [e['cost'] for e in self.failure_observations])
+            params = np.vstack([params, np.array([e['input'] for e in self.failure_observations])])
+
         dedup_indices = self._filter_near_duplicates(params)
         observations = [self.success_observations[i] for i in dedup_indices]
 
