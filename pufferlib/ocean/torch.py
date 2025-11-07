@@ -903,21 +903,36 @@ class Drone(nn.Module):
         return logits, values
 
 class G2048(nn.Module):
-    def __init__(self, env, hidden_size=64):
+    def __init__(self, env, hidden_size=128):
         super().__init__()
         self.hidden_size = hidden_size
         self.is_continuous = False
 
         num_obs = np.prod(env.single_observation_space.shape)
-        self.encoder = torch.nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
-            nn.GELU(),
-        )
-            
+
+        if hidden_size <= 128:
+            self.encoder = torch.nn.Sequential(
+                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(256, 256)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(256, 256)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
+                nn.GELU(),
+            )
+        else:
+            self.encoder = torch.nn.Sequential(
+                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
+                nn.GELU(),
+            )
+
         num_atns = env.single_action_space.n
         self.decoder = torch.nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
@@ -942,7 +957,7 @@ class G2048(nn.Module):
         batch_size = observations.shape[0]
         observations = observations.view(batch_size, -1).float()
 
-        # Scale the feat 1 (tile**1.5)
+        # Scale the feat 1 (tile**1.5) so that training is stable
         observations[:, :16] = observations[:, :16] / 100.0
 
         return self.encoder(observations)

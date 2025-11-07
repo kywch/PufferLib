@@ -396,15 +396,15 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     // Corner reward: A simple nudge to keep the max tile in the top-left corner.
     // When agents learn to put the max tile on the other corners,
     // they miss out snake rew, and this does happen sometimes.
+    bool max_in_corner = (game->grid[0][0] == max_tile);
     float corner_reward = 0.0f;
-    if (game->grid[0][0] == max_tile && max_tile > 4) {
+    if (max_in_corner && max_tile > 4) {
         corner_reward = CORNER_REWARD_WEIGHT;
     }
 
     // Monotonicity reward: look for the snake pattern, only when the max tile is at top left
-    bool max_in_corner = (game->grid[0][0] == max_tile);
     if (max_in_corner) {
-        monotonicity_score += max_tile * max_tile;
+        monotonicity_score += pow_1_5_lookup[max_tile];
         int filled_count = 0;
 
         for (int i = 0; i < 3; i++) {
@@ -419,12 +419,12 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                     unsigned char next_col = game->grid[i][j+1];
                     if (val != EMPTY && next_col != EMPTY) {
                         // Row 0: Reward decreasing left to right, e.g., 12-11-10-9
-                        if (i == 0 && val > next_col) monotonicity_score += next_col * next_col;
+                        if (i == 0 && val > next_col) monotonicity_score += pow_1_5_lookup[next_col];
                         // Row 1: Reward increasing left to right, e.g., 5-6-7-8
-                        else if (i == 1 && val < next_col) monotonicity_score += val * val;
+                        else if (i == 1 && val < next_col) monotonicity_score += pow_1_5_lookup[val];
                         // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
                         // Only when the max tile is high (16384+) and up 2 rows are filled, so the third row starts to matter
-                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 4;
+                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += pow_1_5_lookup[val] * 4;
                     }
                 }
 
@@ -437,7 +437,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
             }
             // Large row-level vertical reward
             if (row_min < 20 && next_row_max > 0 && row_min >= next_row_max) {
-                monotonicity_score += 4 * row_min * row_min;
+                monotonicity_score += 4 * pow_1_5_lookup[row_min];
             }
         }
     }

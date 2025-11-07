@@ -529,25 +529,29 @@ class Protein:
         if not self.success_observations:
             return []
 
+        observations = self.success_observations.copy()
+
         # Update the stats using the full data
-        y = np.array([e['output'] for e in self.success_observations])
+        y = np.array([e['output'] for e in observations])
         self.min_score, self.max_score = y.min(), y.max()
 
-        c = np.array([e['cost'] for e in self.success_observations])
+        c = np.array([e['cost'] for e in observations])
         log_c = np.log(np.maximum(c, EPSILON))
         self.log_c_min, self.log_c_max = log_c.min(), log_c.max()
 
-        params = np.array([e['input'] for e in self.success_observations])
-
         # When the data is scare, also use failed observations
-        if len(self.success_observations) < 100 and self.failure_observations:
-            # Give the min score for the failed obs
-            y = np.append(y, [self.min_score]*len(self.failure_observations))
-            c = np.append(c, [e['cost'] for e in self.failure_observations])
-            params = np.vstack([params, np.array([e['input'] for e in self.failure_observations])])
+        if len(observations) < 100 and self.failure_observations:
+            # Give the min score for the failed obs, so this value will keep changing.
+            for e in self.failure_observations:
+                e['output'] = self.min_score
+            
+            # NOTE: the order of obs matters since recent obs are always fed into gp training
+            # So, putting the failure obs first.
+            observations = self.failure_observations + observations
 
+        params = np.array([np.append(e['input'], [e['output'], e['cost']]) for e in observations])
         dedup_indices = self._filter_near_duplicates(params)
-        observations = [self.success_observations[i] for i in dedup_indices]
+        observations = [observations[i] for i in dedup_indices]
 
         if max_size is None:
             max_size = self.gp_max_obs
