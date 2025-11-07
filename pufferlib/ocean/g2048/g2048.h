@@ -18,11 +18,12 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define BASE_MAX_TICKS 1000
 
 // These work well
-#define MERGE_REWARD_WEIGHT 0.0625f
+#define MERGE_REWARD_WEIGHT 0.02f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
 #define POTENTIAL_MERGE_WEIGHT 0.001f
-#define CORNER_REWARD_WEIGHT 0.01f
+#define CORNER_REWARD_WEIGHT 0.005f
+#define MILESTONE_REWARD_WEIGHT 1.0f
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -424,7 +425,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                         else if (i == 1 && val < next_col) monotonicity_score += pow_1_5_lookup[val];
                         // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
                         // Only when the max tile is high (16384+) and up 2 rows are filled, so the third row starts to matter
-                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 5;
+                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 3;
                     }
                 }
 
@@ -455,6 +456,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
 void c_step(Game* game) {
     float reward = 0.0f;
     float score_add = 0.0f;
+    unsigned char prev_max_tile = game->max_tile;
     bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
     game->tick++;
 
@@ -465,8 +467,12 @@ void c_step(Game* game) {
 
         // Add heuristic rewards/penalties and update grid stats
         reward += update_stats_and_get_heuristic_rewards(game);
-        update_observations(game); // Observations only change if the grid changes
 
+        // Huge reward for reaching tiles about 16k
+        if (game->max_tile > prev_max_tile && game->max_tile >= 14) reward += MILESTONE_REWARD_WEIGHT;
+
+        update_observations(game); // Observations only change if the grid changes
+        
         // This is to limit infinite invalid moves during eval
         // Don't need to be tight. Don't need to show to human player.
         game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
