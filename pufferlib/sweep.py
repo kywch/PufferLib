@@ -134,7 +134,7 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'num_random_samples'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only'):
             continue
 
         assert isinstance(param, dict)
@@ -443,7 +443,12 @@ class Protein:
             cost_param = "train/total_timesteps",
             prune_pareto = True,
         ):
-        self.device = torch.device("cuda:0" if use_gpu and torch.cuda.is_available() else "cpu")
+        # Process sweep config. NOTE: sweep_config takes precedence. It's not good.
+        _use_gpu = sweep_config['use_gpu'] if 'use_gpu' in sweep_config else use_gpu
+        _prune_pareto = sweep_config['prune_pareto'] if 'prune_pareto' in sweep_config else prune_pareto
+        _num_random_samples = 10 if sweep_config['downsample'] == 1 else num_random_samples
+
+        self.device = torch.device("cuda:0" if _use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
         self.global_search_scale = global_search_scale
         self.suggestions_per_pareto = suggestions_per_pareto
@@ -454,7 +459,7 @@ class Protein:
         self.gp_training_iter = gp_training_iter
         self.gp_learning_rate = gp_learning_rate
         self.optimizer_reset_frequency = optimizer_reset_frequency
-        self.prune_pareto = prune_pareto
+        self.prune_pareto = _prune_pareto
 
         self.success_observations = []
         self.failure_observations = []
@@ -465,7 +470,7 @@ class Protein:
 
         # Use Sobel seq for structured random exploration
         self.sobol = Sobol(d=self.hyperparameters.num, scramble=True)
-        self.num_random_samples = num_random_samples
+        self.num_random_samples = _num_random_samples
         # NOTE: test if sobol sampling really helps
         # points_per_run = sweep_config['downsample']
         # self.num_random_samples = 3 * points_per_run * self.hyperparameters.num
@@ -601,11 +606,13 @@ class Protein:
     def suggest(self, fill):
         info = {}
         self.suggestion_idx += 1
-        if len(self.success_observations) == 0 and self.seed_with_search_center:
-            suggestion = self.hyperparameters.search_centers
-            return self.hyperparameters.to_dict(suggestion, fill), info
+        
+        # NOTE: Changed pufferl to use the train args, NOT the sweep hyperparam search center
+        # if len(self.success_observations) == 0 and self.seed_with_search_center:
+        #     suggestion = self.hyperparameters.search_centers
+        #     return self.hyperparameters.to_dict(suggestion, fill), info
 
-        elif len(self.success_observations) < self.num_random_samples:
+        if self.suggestion_idx <= self.num_random_samples:
             # Suggest the next point in the Sobol sequence
             zero_one = self.sobol.random(1)[0]
             suggestion = 2*zero_one - 1  # Scale from [0, 1) to [-1, 1)

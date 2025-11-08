@@ -270,7 +270,7 @@ void add_random_tile(Game* game) {
 }
 
 // Optimized slide and merge with fewer memory operations
-static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase) {
+static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase, float reward_multiplier) {
     bool moved = false;
     int write_pos = 0;
     
@@ -290,7 +290,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
+            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT * reward_multiplier;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -316,7 +316,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[idx][col];
             }
             
-            if (slide_and_merge(temp, reward, score_increase)) {
+            if (slide_and_merge(temp, reward, score_increase, 1.0f)) {
                 moved = true;
                 // Write back column
                 for (int i = 0; i < SIZE; i++) {
@@ -333,7 +333,10 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[row][idx];
             }
             
-            if (slide_and_merge(temp, reward, score_increase)) {
+            // 10% reward boost for horizontal merge over vertical.
+            // To nudge agents to place max tiles horizontally in the top row.
+            // If those are put vertically, snake rew is messed up
+            if (slide_and_merge(temp, reward, score_increase, 1.10f)) {
                 moved = true;
                 // Write back row
                 for (int i = 0; i < SIZE; i++) {
