@@ -7,14 +7,15 @@ import pufferlib
 from pufferlib.ocean.g2048 import binding
 
 class G2048(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, scaffolding_ratio=0.0, snake_reward_weight=0.0, render_mode=None, log_interval=128, buf=None, seed=0):
+    def __init__(self, num_envs=1, reward_scaler=1.0, scaffolding_ratio=0.0, snake_reward_weight=0.0, render_mode=None, log_interval=128, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(
-            low=0, high=100, shape=(16*18,), dtype=np.uint8
+            low=0, high=100, shape=(16*18 + 1,), dtype=np.uint8
         )
         self.single_action_space = gymnasium.spaces.Discrete(4)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
+        self.reward_scaler = reward_scaler
         self.scaffolding_ratio = scaffolding_ratio
         self.snake_reward_weight = snake_reward_weight
 
@@ -22,6 +23,7 @@ class G2048(pufferlib.PufferEnv):
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed,
+            reward_scaler = self.reward_scaler,
             scaffolding_ratio = self.scaffolding_ratio,
             snake_reward_weight = self.snake_reward_weight
         )

@@ -18,13 +18,10 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define BASE_MAX_TICKS 1000
 
 // These work well
-#define BASE_MERGE_REWARD 0.1f
-#define MERGE_BONUS_WEIGHT 0.01f
+#define MERGE_REWARD_WEIGHT 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
-#define POTENTIAL_MERGE_WEIGHT 0.001f
-#define CORNER_REWARD_WEIGHT 0.005f
-#define MILESTONE_REWARD_WEIGHT 1.0f
+#define CORNER_REWARD_WEIGHT 0.01f
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -42,10 +39,12 @@ typedef struct {
     float merge_score;
     float episode_return;
     float episode_length;
-    float snake_reward;
     float lifetime_max_tile;
     float reached_32768;
     float reached_65536;
+    float snake_state;
+    float partial_snake_reward;
+    float complete_snake_reward;
     float n;
 } Log;
 
@@ -55,6 +54,8 @@ typedef struct {
     int* actions;                   // Required
     float* rewards;                 // Required
     unsigned char* terminals;       // Required
+
+    float reward_scaler;            // Pufferlib clips rew from -1 to 1, adjust the resulting rew accordingly
 
     float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
     bool is_scaffolding_episode;
@@ -66,7 +67,8 @@ typedef struct {
     unsigned char lifetime_max_tile;
     unsigned char max_tile;         // Episode max tile
     float episode_reward;           // Accumulate episode reward
-    float snake_reward;
+    float partial_snake_reward;
+    float complete_snake_reward;
     int moves_made;
     int max_episode_ticks;          // Dynamic max_ticks based on score
 
@@ -74,6 +76,8 @@ typedef struct {
     int empty_count;
     bool game_over_cached;
     bool grid_changed;
+    bool is_snake_state;
+    int snake_state_tick;
 } Game;
 
 // Precomputed color table for rendering optimization
@@ -122,9 +126,10 @@ static inline void update_observations(Game* game) {
     // 1. Normalized tile value (current_val / max_val)
     // 2. One-hot for empty (1 if empty, 0 if occupied)
     // 3. One-hot for tile values 2^1 to 2^16 (16 features)
+    // 4. Additional obs: is_snake_state (1)
 
     int num_cell = SIZE * SIZE;
-    memset(game->observations, 0, num_cell * NUM_FEATURES * sizeof(unsigned char));
+    memset(game->observations, 0, (num_cell * NUM_FEATURES + 1) * sizeof(unsigned char));
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
             int feat1_idx = (i * SIZE + j);
@@ -146,6 +151,9 @@ static inline void update_observations(Game* game) {
             }
         }
     }
+    // Additional obs
+    int offset = num_cell * NUM_FEATURES;
+    game->observations[offset] = game->is_snake_state;
 }
 
 void add_log(Game* game) {
@@ -162,10 +170,12 @@ void add_log(Game* game) {
     game->log.merge_score += (float)game->score;
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
-    game->log.snake_reward += game->snake_reward;
     game->log.lifetime_max_tile += (float)(1 << game->lifetime_max_tile);
     game->log.reached_32768 += (game->max_tile >= 15);
     game->log.reached_65536 += (game->max_tile >= 16);
+    game->log.snake_state += (float)game->snake_state_tick / (float)game->tick;
+    game->log.partial_snake_reward += game->partial_snake_reward * game->snake_reward_weight * game->reward_scaler;
+    game->log.complete_snake_reward += game->complete_snake_reward * game->snake_reward_weight * game->reward_scaler;
     game->log.n += 1;
 }
 
@@ -185,8 +195,11 @@ void c_reset(Game* game) {
     game->moves_made = 0;
     game->max_episode_ticks = BASE_MAX_TICKS;
     game->max_tile = 0;
-    game->snake_reward = 0;
-    
+    game->is_snake_state = false;
+    game->snake_state_tick = 0;
+    game->partial_snake_reward = 0;
+    game->complete_snake_reward = 0;
+
     if (game->terminals) game->terminals[0] = 0;
 
     // Higher tiles are spawned in scaffolding episodes
@@ -277,7 +290,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += BASE_MERGE_REWARD + ((float)pow_1_5_lookup[row[i]]) * MERGE_BONUS_WEIGHT;
+            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -379,7 +392,9 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     int empty_count = 0;
     unsigned char max_tile = 0;
     int potential_merges = 0;
-    float monotonicity_score = 0.0f;
+    float partial_snake_score = 0.0f;
+    float complete_snake_score = 0.0f;
+    game->is_snake_state = false;
     
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
@@ -404,10 +419,11 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         corner_reward = CORNER_REWARD_WEIGHT;
     }
 
-    // Monotonicity reward: look for the snake pattern, only when the max tile is at top left
+    // Snake reward: look for the snake pattern, only when the max tile is at top left
     if (max_in_corner) {
-        monotonicity_score += pow_1_5_lookup[max_tile];
+        partial_snake_score += pow_1_5_lookup[max_tile];
         int filled_count = 0;
+        int evidence_for_snake = 0;
 
         for (int i = 0; i < 3; i++) {
             unsigned char row_min = 32;
@@ -421,12 +437,17 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                     unsigned char next_col = game->grid[i][j+1];
                     if (val != EMPTY && next_col != EMPTY) {
                         // Row 0: Reward decreasing left to right, e.g., 12-11-10-9
-                        if (i == 0 && val > next_col) monotonicity_score += pow_1_5_lookup[next_col];
+                        if (i == 0 && val > next_col) {
+                            partial_snake_score += pow_1_5_lookup[next_col];
+                            evidence_for_snake++;
+                        }
                         // Row 1: Reward increasing left to right, e.g., 5-6-7-8
-                        else if (i == 1 && val < next_col) monotonicity_score += pow_1_5_lookup[val];
+                        else if (i == 1 && val < next_col) {
+                            partial_snake_score += pow_1_5_lookup[val];
+                            evidence_for_snake++;
+                        }
                         // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
-                        // Only when the max tile is high (16384+) and up 2 rows are filled, so the third row starts to matter
-                        else if (i == 2 && max_tile > 13 && filled_count > 8 && val > next_col) monotonicity_score += val * val * 3;
+                        else if (i == 2 && filled_count > 8 && val > next_col) partial_snake_score += val * val;
                     }
                 }
 
@@ -435,29 +456,36 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                 unsigned char next_row = game->grid[i+1][j];
                 if (next_row != EMPTY && next_row > next_row_max) next_row_max = next_row;
                 // Small column-level vertical reward
-                if (val != EMPTY && next_row != EMPTY && val > next_row) monotonicity_score += 3 * val;
+                if (val != EMPTY && next_row != EMPTY && val > next_row) partial_snake_score += 3 * val;
             }
             // Large row-level vertical reward
-            if (row_min < 20 && next_row_max > 0 && row_min >= next_row_max) {
-                monotonicity_score += 4 * pow_1_5_lookup[row_min];
+            if (i < 2 && row_min < 20 && next_row_max > 0 && row_min >= next_row_max) {
+                partial_snake_score += 4 * pow_1_5_lookup[row_min];
+                evidence_for_snake++;
             }
+        }
+
+        // Complete snake bonus: top two rows are snake, and the left most cell in the third row 
+        unsigned char snake_tail = game->grid[2][0];
+        if (evidence_for_snake >= 8 && snake_tail != EMPTY && snake_tail == max_tile - 8) {
+            game->is_snake_state = true;
+            game->snake_state_tick++;
+            complete_snake_score = 500 * snake_tail * snake_tail;
         }
     }
     
     game->empty_count = empty_count;
     game->max_tile = max_tile;
+
+    game->partial_snake_reward += partial_snake_score;
+    game->complete_snake_reward += complete_snake_score;
     
-    float merge_reward = (float)potential_merges * POTENTIAL_MERGE_WEIGHT;
-    float monotonicity_reward = monotonicity_score * game->snake_reward_weight;
-    game->snake_reward += monotonicity_reward;
-    
-    return merge_reward + monotonicity_reward + corner_reward;
+    return corner_reward + (partial_snake_score + complete_snake_score) * game->snake_reward_weight;
 }
 
 void c_step(Game* game) {
     float reward = 0.0f;
     float score_add = 0.0f;
-    unsigned char prev_max_tile = game->max_tile;
     bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
     game->tick++;
 
@@ -468,9 +496,7 @@ void c_step(Game* game) {
 
         // Add heuristic rewards/penalties and update grid stats
         reward += update_stats_and_get_heuristic_rewards(game);
-
-        // Huge one-time reward for breaking records from 1024
-        if (game->max_tile > prev_max_tile && game->max_tile >= 10) reward += MILESTONE_REWARD_WEIGHT;
+        reward *= game->reward_scaler;
 
         update_observations(game); // Observations only change if the grid changes
         
