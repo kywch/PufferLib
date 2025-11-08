@@ -391,7 +391,7 @@ bool is_game_over(Game* game) {
 static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     int empty_count = 0;
     unsigned char max_tile = 0;
-    int potential_merges = 0;
+    unsigned char second_max_tile = 0;
     float partial_snake_score = 0.0f;
     float complete_snake_score = 0.0f;
     game->is_snake_state = false;
@@ -402,25 +402,29 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
             
             // Update empty count and max tile
             if (val == EMPTY) empty_count++;
-            if (val > max_tile) max_tile = val;
-
-            // Count potential merges
-            if (i < SIZE - 1 && val != EMPTY && val == game->grid[i+1][j]) potential_merges++;
-            if (j < SIZE - 1 && val != EMPTY && val == game->grid[i][j+1]) potential_merges++;
+            
+            // Allow max and the second max tile to be the same
+            if (val >= max_tile) {
+                second_max_tile = max_tile;
+                max_tile = val;
+            } else if (val > second_max_tile && val < max_tile) {
+                second_max_tile = val;
+            }
         }
     }
 
-    // Corner reward: A simple nudge to keep the max tile in the top-left corner.
-    // When agents learn to put the max tile on the other corners,
+    bool max_in_top_left = (game->grid[0][0] == max_tile);
+
+    // Corner reward: A simple nudge to keep the max tiles horizontally in the top row, left corner.
+    // When agents learn to put the max tile on the other corners, or put max tiles vertically
     // they miss out snake rew, and this does happen sometimes.
-    bool max_in_corner = (game->grid[0][0] == max_tile);
     float corner_reward = 0.0f;
-    if (max_in_corner && max_tile > 4) {
+    if (max_in_top_left && game->grid[0][1] == second_max_tile && max_tile > 4) {
         corner_reward = CORNER_REWARD_WEIGHT;
     }
 
     // Snake reward: look for the snake pattern, only when the max tile is at top left
-    if (max_in_corner) {
+    if (max_in_top_left) {
         partial_snake_score += pow_1_5_lookup[max_tile];
         int filled_count = 0;
         int evidence_for_snake = 0;
