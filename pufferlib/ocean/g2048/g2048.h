@@ -270,7 +270,7 @@ void add_random_tile(Game* game) {
 }
 
 // Optimized slide and merge with fewer memory operations
-static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase, float reward_multiplier) {
+static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase) {
     bool moved = false;
     int write_pos = 0;
     
@@ -290,7 +290,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT * reward_multiplier;
+            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -316,7 +316,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[idx][col];
             }
             
-            if (slide_and_merge(temp, reward, score_increase, 1.0f)) {
+            if (slide_and_merge(temp, reward, score_increase)) {
                 moved = true;
                 // Write back column
                 for (int i = 0; i < SIZE; i++) {
@@ -333,10 +333,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[row][idx];
             }
             
-            // 10% reward boost for horizontal merge over vertical.
-            // To nudge agents to place max tiles horizontally in the top row.
-            // If those are put vertically, snake rew is messed up
-            if (slide_and_merge(temp, reward, score_increase, 1.10f)) {
+            if (slide_and_merge(temp, reward, score_increase)) {
                 moved = true;
                 // Write back row
                 for (int i = 0; i < SIZE; i++) {
@@ -462,11 +459,11 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                 if (val != EMPTY && val < row_min) row_min = val;
                 unsigned char next_row = game->grid[i+1][j];
                 if (next_row != EMPTY && next_row > next_row_max) next_row_max = next_row;
-                // Small column-level vertical reward
-                if (val != EMPTY && next_row != EMPTY && val > next_row) partial_snake_score += 3 * val;
+                // // Small column-level vertical reward
+                if (val != EMPTY && next_row != EMPTY && val > next_row) partial_snake_score += next_row;
             }
             // Large row-level vertical reward
-            if (i < 2 && row_min < 20 && next_row_max > 0 && row_min >= next_row_max) {
+            if (i < 2 && row_min < 20 && next_row_max > 0 && row_min > next_row_max) {
                 partial_snake_score += 4 * pow_1_5_lookup[row_min];
                 evidence_for_snake++;
             }
