@@ -429,7 +429,7 @@ class Protein:
             sweep_config,
             max_suggestion_cost = 3600,
             resample_frequency = 0,
-            num_random_samples = 30,
+            num_random_samples = 10,
             global_search_scale = 1,
             suggestions_per_pareto = 256,
             seed_with_search_center = True,
@@ -446,7 +446,6 @@ class Protein:
         # Process sweep config. NOTE: sweep_config takes precedence. It's not good.
         _use_gpu = sweep_config['use_gpu'] if 'use_gpu' in sweep_config else use_gpu
         _prune_pareto = sweep_config['prune_pareto'] if 'prune_pareto' in sweep_config else prune_pareto
-        _num_random_samples = 10 if sweep_config['downsample'] == 1 else num_random_samples
 
         self.device = torch.device("cuda:0" if _use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
@@ -470,7 +469,7 @@ class Protein:
 
         # Use Sobel seq for structured random exploration
         self.sobol = Sobol(d=self.hyperparameters.num, scramble=True)
-        self.num_random_samples = _num_random_samples
+        self.num_random_samples = num_random_samples
         # NOTE: test if sobol sampling really helps
         # points_per_run = sweep_config['downsample']
         # self.num_random_samples = 3 * points_per_run * self.hyperparameters.num
