@@ -21,7 +21,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define MERGE_REWARD_WEIGHT 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
-#define CORNER_REWARD_WEIGHT 0.01f
+#define STATE_REWARD_WEIGHT 0.01f // Fixed, small reward for maintaining "desirable" states
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -78,6 +78,7 @@ typedef struct {
     bool grid_changed;
     bool is_snake_state;
     int snake_state_tick;
+    bool is_high_stake_snake;
 } Game;
 
 // Precomputed color table for rendering optimization
@@ -126,10 +127,11 @@ static inline void update_observations(Game* game) {
     // 1. Normalized tile value (current_val / max_val)
     // 2. One-hot for empty (1 if empty, 0 if occupied)
     // 3. One-hot for tile values 2^1 to 2^16 (16 features)
-    // 4. Additional obs: is_snake_state (1)
+    // 4. Additional obs: is_snake_state (1), is_high_stake_snake (1)
 
     int num_cell = SIZE * SIZE;
-    memset(game->observations, 0, (num_cell * NUM_FEATURES + 1) * sizeof(unsigned char));
+    int num_additional_obs = 2;
+    memset(game->observations, 0, (num_cell * NUM_FEATURES + num_additional_obs) * sizeof(unsigned char));
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
             int feat1_idx = (i * SIZE + j);
@@ -154,6 +156,7 @@ static inline void update_observations(Game* game) {
     // Additional obs
     int offset = num_cell * NUM_FEATURES;
     game->observations[offset] = game->is_snake_state;
+    game->observations[offset+1] = game->is_high_stake_snake;
 }
 
 void add_log(Game* game) {
@@ -195,10 +198,11 @@ void c_reset(Game* game) {
     game->moves_made = 0;
     game->max_episode_ticks = BASE_MAX_TICKS;
     game->max_tile = 0;
-    game->is_snake_state = false;
     game->snake_state_tick = 0;
     game->partial_snake_reward = 0;
     game->complete_snake_reward = 0;
+    game->is_snake_state = false;
+    game->is_high_stake_snake = false;
 
     if (game->terminals) game->terminals[0] = 0;
 
@@ -390,11 +394,14 @@ bool is_game_over(Game* game) {
 // Combined grid stats and heuristic calculation for performance
 static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     int empty_count = 0;
+    int top_row_count = 0;
     unsigned char max_tile = 0;
     unsigned char second_max_tile = 0;
+    float heuristic_state_reward = 0.0f;
     float partial_snake_score = 0.0f;
     float complete_snake_score = 0.0f;
     game->is_snake_state = false;
+    game->is_high_stake_snake = false;
     
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
@@ -402,6 +409,9 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
             
             // Update empty count and max tile
             if (val == EMPTY) empty_count++;
+
+            // Count filled cells in the top row
+            if (i == 0 && val != EMPTY) top_row_count++;
             
             // Allow max and the second max tile to be the same
             if (val >= max_tile) {
@@ -413,14 +423,16 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         }
     }
 
+    // Filled top row reward: A simple nudge to keep the top row filled
+    if (top_row_count == SIZE) heuristic_state_reward += STATE_REWARD_WEIGHT;
+
     bool max_in_top_left = (game->grid[0][0] == max_tile);
 
     // Corner reward: A simple nudge to keep the max tiles horizontally in the top row, left corner.
     // When agents learn to put the max tile on the other corners, or put max tiles vertically
     // they miss out snake rew, and this does happen sometimes.
-    float corner_reward = 0.0f;
     if (max_in_top_left && game->grid[0][1] == second_max_tile && max_tile > 4) {
-        corner_reward = CORNER_REWARD_WEIGHT;
+        heuristic_state_reward += STATE_REWARD_WEIGHT;
     }
 
     // Snake reward: look for the snake pattern, only when the max tile is at top left
@@ -471,10 +483,15 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
 
         // Complete snake bonus: top two rows are snake, and the left most cell in the third row 
         unsigned char snake_tail = game->grid[2][0];
+        float snake_multiflier = 100.0f;
         if (evidence_for_snake >= 8 && snake_tail != EMPTY && snake_tail == max_tile - 8) {
             game->is_snake_state = true;
             game->snake_state_tick++;
-            complete_snake_score = 100 * snake_tail * snake_tail;
+            if (max_tile >= 14) {
+                snake_multiflier = 500.0f;
+                game->is_high_stake_snake = true;
+            }
+            complete_snake_score = snake_multiflier * snake_tail * snake_tail;
         }
     }
     
@@ -484,7 +501,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     game->partial_snake_reward += partial_snake_score;
     game->complete_snake_reward += complete_snake_score;
     
-    return corner_reward + (partial_snake_score + complete_snake_score) * game->snake_reward_weight;
+    return heuristic_state_reward + (partial_snake_score + complete_snake_score) * game->snake_reward_weight;
 }
 
 void c_step(Game* game) {
