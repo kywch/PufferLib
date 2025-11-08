@@ -470,7 +470,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         if (evidence_for_snake >= 8 && snake_tail != EMPTY && snake_tail == max_tile - 8) {
             game->is_snake_state = true;
             game->snake_state_tick++;
-            complete_snake_score = 500 * snake_tail * snake_tail;
+            complete_snake_score = 150 * snake_tail * snake_tail;
         }
     }
     
