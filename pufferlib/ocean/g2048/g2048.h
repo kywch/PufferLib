@@ -62,6 +62,7 @@ typedef struct {
 
     float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
     bool is_scaffolding_episode;
+    bool use_heuristic_rewards;
     float snake_reward_weight;
 
     int score;
@@ -433,6 +434,13 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         }
     }
 
+    game->empty_count = empty_count;
+    game->max_tile = max_tile;
+
+    if (!game->use_heuristic_rewards) return 0.0f;
+
+    /* Heuristic rewards */
+
     // Filled top row reward: A simple nudge to keep the top row filled
     if (top_row_count == SIZE) heuristic_state_reward += STATE_REWARD_WEIGHT;
 
@@ -496,9 +504,6 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         }
     }
     
-    game->empty_count = empty_count;
-    game->max_tile = max_tile;
-
     game->monotonicity_reward += monotonicity_reward;
     game->snake_reward += snake_reward;
     

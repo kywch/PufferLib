@@ -7,6 +7,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->reward_scaler = unpack(kwargs, "reward_scaler");
     env->scaffolding_ratio = unpack(kwargs, "scaffolding_ratio");
     env->scaffolding_ratio = max(min(env->scaffolding_ratio, 0.9f), 0.0f);
+    env->use_heuristic_rewards = unpack(kwargs, "use_heuristic_rewards");
     env->snake_reward_weight = unpack(kwargs, "snake_reward_weight");
     env->lifetime_max_tile = 0;
     return 0;
