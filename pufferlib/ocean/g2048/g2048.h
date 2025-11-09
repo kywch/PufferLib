@@ -524,7 +524,7 @@ void c_step(Game* game) {
         
         // This is to limit infinite invalid moves during eval
         // Don't need to be tight. Don't need to show to human player.
-        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
+        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 4);
 
     } else {
         reward = INVALID_MOVE_PENALTY;
