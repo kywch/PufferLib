@@ -24,7 +24,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 
 // These may need experimenting, but work for now
 #define STATE_REWARD_WEIGHT 0.01f // Fixed, small reward for maintaining "desirable" states
-#define MONOTONICITY_REWARD_WEIGHT 0.00005f
+#define MONOTONICITY_REWARD_WEIGHT 0.00003f
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -222,6 +222,13 @@ void c_reset(Game* game) {
                 game->grid[0][j] = game->lifetime_max_tile - j;
                 game->empty_count--;
             }
+
+            // Add a snake tail: either 1024 or 2048
+            if (game->lifetime_max_tile >= 15 && curriculum < 2) {
+                game->grid[1][3] = 10 + curriculum;
+                game->empty_count--;
+            }
+
         } else {
             int pos = rand() % (SIZE * SIZE);
             int i = pos / SIZE;
@@ -485,15 +492,12 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
 
         // Snake bonus: sorted top row + the max_tile_in_row234 in the second row right
         // For example, top row: 14-13-12-11, second row: ()-()-()-10
-        unsigned char snake_tail = game->grid[1][SIZE];
+        unsigned char snake_tail = game->grid[1][3];
         if (evidence_for_snake >= 4 && snake_tail == max_tile_in_row234) {
             game->is_snake_state = true;
             game->snake_state_tick++;
             snake_reward = 10 * snake_tail * snake_tail;
-            if (max_tile >= 14) {
-                game->is_high_stake_snake = true;
-                snake_reward *= 3;
-            }
+            if (max_tile >= 14) game->is_high_stake_snake = true;
         }
     }
     
