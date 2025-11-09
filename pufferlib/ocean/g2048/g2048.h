@@ -81,7 +81,6 @@ typedef struct {
     bool grid_changed;
     bool is_snake_state;
     int snake_state_tick;
-    bool is_high_stake_snake;
 } Game;
 
 // Precomputed color table for rendering optimization
@@ -130,10 +129,10 @@ static inline void update_observations(Game* game) {
     // 1. Normalized tile value (current_val / max_val)
     // 2. One-hot for empty (1 if empty, 0 if occupied)
     // 3. One-hot for tile values 2^1 to 2^16 (16 features)
-    // 4. Additional obs: is_snake_state (1), is_high_stake_snake (1)
+    // 4. Additional obs: is_snake_state (1)
 
     int num_cell = SIZE * SIZE;
-    int num_additional_obs = 2;
+    int num_additional_obs = 1;
     memset(game->observations, 0, (num_cell * NUM_FEATURES + num_additional_obs) * sizeof(unsigned char));
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
@@ -159,7 +158,6 @@ static inline void update_observations(Game* game) {
     // Additional obs
     int offset = num_cell * NUM_FEATURES;
     game->observations[offset] = game->is_snake_state;
-    game->observations[offset+1] = game->is_high_stake_snake;
 }
 
 void add_log(Game* game) {
@@ -205,7 +203,6 @@ void c_reset(Game* game) {
     game->monotonicity_reward = 0;
     game->snake_reward = 0;
     game->is_snake_state = false;
-    game->is_high_stake_snake = false;
 
     if (game->terminals) game->terminals[0] = 0;
 
@@ -412,7 +409,6 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     float monotonicity_reward = 0.0f;
     float snake_reward = 0.0f;
     game->is_snake_state = false;
-    game->is_high_stake_snake = false;
     
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
@@ -496,8 +492,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
         if (evidence_for_snake >= 4 && snake_tail == max_tile_in_row234) {
             game->is_snake_state = true;
             game->snake_state_tick++;
-            snake_reward = 10 * snake_tail * snake_tail;
-            if (max_tile >= 14) game->is_high_stake_snake = true;
+            snake_reward = snake_tail * snake_tail;
         }
     }
     
