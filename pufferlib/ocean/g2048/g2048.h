@@ -21,7 +21,10 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define MERGE_REWARD_WEIGHT 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
+
+// These may need experimenting, but work for now
 #define STATE_REWARD_WEIGHT 0.01f // Fixed, small reward for maintaining "desirable" states
+#define MONOTONICITY_REWARD_WEIGHT 0.00005f
 
 // Features: 18 per cell
 // 1. Normalized tile value (current_val / max_val)
@@ -43,8 +46,8 @@ typedef struct {
     float reached_32768;
     float reached_65536;
     float snake_state;
-    float partial_snake_reward;
-    float complete_snake_reward;
+    float monotonicity_reward;
+    float snake_reward;
     float n;
 } Log;
 
@@ -67,8 +70,8 @@ typedef struct {
     unsigned char lifetime_max_tile;
     unsigned char max_tile;         // Episode max tile
     float episode_reward;           // Accumulate episode reward
-    float partial_snake_reward;
-    float complete_snake_reward;
+    float monotonicity_reward;
+    float snake_reward;
     int moves_made;
     int max_episode_ticks;          // Dynamic max_ticks based on score
 
@@ -177,8 +180,8 @@ void add_log(Game* game) {
     game->log.reached_32768 += (game->max_tile >= 15);
     game->log.reached_65536 += (game->max_tile >= 16);
     game->log.snake_state += (float)game->snake_state_tick / (float)game->tick;
-    game->log.partial_snake_reward += game->partial_snake_reward * game->snake_reward_weight * game->reward_scaler;
-    game->log.complete_snake_reward += game->complete_snake_reward * game->snake_reward_weight * game->reward_scaler;
+    game->log.monotonicity_reward += game->monotonicity_reward * MONOTONICITY_REWARD_WEIGHT * game->reward_scaler;
+    game->log.snake_reward += game->snake_reward * game->snake_reward_weight * game->reward_scaler;
     game->log.n += 1;
 }
 
@@ -199,8 +202,8 @@ void c_reset(Game* game) {
     game->max_episode_ticks = BASE_MAX_TICKS;
     game->max_tile = 0;
     game->snake_state_tick = 0;
-    game->partial_snake_reward = 0;
-    game->complete_snake_reward = 0;
+    game->monotonicity_reward = 0;
+    game->snake_reward = 0;
     game->is_snake_state = false;
     game->is_high_stake_snake = false;
 
@@ -397,9 +400,10 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     int top_row_count = 0;
     unsigned char max_tile = 0;
     unsigned char second_max_tile = 0;
+    unsigned char max_tile_in_row234 = 0;
     float heuristic_state_reward = 0.0f;
-    float partial_snake_score = 0.0f;
-    float complete_snake_score = 0.0f;
+    float monotonicity_reward = 0.0f;
+    float snake_reward = 0.0f;
     game->is_snake_state = false;
     game->is_high_stake_snake = false;
     
@@ -420,6 +424,9 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
             } else if (val > second_max_tile && val < max_tile) {
                 second_max_tile = val;
             }
+
+            // Get the max tile in the 2nd, 3rd, 4th row
+            if (i > 0 && val > max_tile_in_row234) max_tile_in_row234 = val;
         }
     }
 
@@ -437,16 +444,14 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
 
     // Snake reward: look for the snake pattern, only when the max tile is at top left
     if (max_in_top_left) {
-        partial_snake_score += pow_1_5_lookup[max_tile];
-        int filled_count = 0;
+        monotonicity_reward += pow_1_5_lookup[max_tile];
         int evidence_for_snake = 0;
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             unsigned char row_min = 32;
             unsigned char next_row_max = 0;
             for (int j = 0; j < SIZE; j++) {
                 unsigned char val = game->grid[i][j];
-                if (val != EMPTY) filled_count++;
 
                 // Check horizontal monotonicity (snake pattern) for top two rows only
                 if (j < SIZE - 1) {
@@ -454,16 +459,13 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                     if (val != EMPTY && next_col != EMPTY) {
                         // Row 0: Reward decreasing left to right, e.g., 12-11-10-9
                         if (i == 0 && val > next_col) {
-                            partial_snake_score += pow_1_5_lookup[next_col];
+                            monotonicity_reward += pow_1_5_lookup[next_col];
                             evidence_for_snake++;
                         }
                         // Row 1: Reward increasing left to right, e.g., 5-6-7-8
                         else if (i == 1 && val < next_col) {
-                            partial_snake_score += pow_1_5_lookup[val];
-                            evidence_for_snake++;
+                            monotonicity_reward += pow_1_5_lookup[val];
                         }
-                        // Row 2: Reward decreasing left to right, e.g., 4-3-2-1
-                        else if (i == 2 && filled_count > 8 && val > next_col) partial_snake_score += val * val;
                     }
                 }
 
@@ -472,36 +474,36 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
                 unsigned char next_row = game->grid[i+1][j];
                 if (next_row != EMPTY && next_row > next_row_max) next_row_max = next_row;
                 // // Small column-level vertical reward
-                if (val != EMPTY && next_row != EMPTY && val > next_row) partial_snake_score += next_row;
+                if (val != EMPTY && next_row != EMPTY && val > next_row) monotonicity_reward += next_row;
             }
             // Large row-level vertical reward
             if (i < 2 && row_min < 20 && next_row_max > 0 && row_min > next_row_max) {
-                partial_snake_score += 4 * pow_1_5_lookup[row_min];
-                evidence_for_snake++;
+                monotonicity_reward += 4 * pow_1_5_lookup[row_min];
+                if (i == 0) evidence_for_snake++;
             }
         }
 
-        // Complete snake bonus: top two rows are snake, and the left most cell in the third row 
-        unsigned char snake_tail = game->grid[2][0];
-        float snake_multiflier = 100.0f;
-        if (evidence_for_snake >= 8 && snake_tail != EMPTY && snake_tail == max_tile - 8) {
+        // Snake bonus: sorted top row + the max_tile_in_row234 in the second row right
+        // For example, top row: 14-13-12-11, second row: ()-()-()-10
+        unsigned char snake_tail = game->grid[1][SIZE];
+        if (evidence_for_snake >= 4 && snake_tail == max_tile_in_row234) {
             game->is_snake_state = true;
             game->snake_state_tick++;
+            snake_reward = 10 * snake_tail * snake_tail;
             if (max_tile >= 14) {
-                snake_multiflier = 500.0f;
                 game->is_high_stake_snake = true;
+                snake_reward *= 3;
             }
-            complete_snake_score = snake_multiflier * snake_tail * snake_tail;
         }
     }
     
     game->empty_count = empty_count;
     game->max_tile = max_tile;
 
-    game->partial_snake_reward += partial_snake_score;
-    game->complete_snake_reward += complete_snake_score;
+    game->monotonicity_reward += monotonicity_reward;
+    game->snake_reward += snake_reward;
     
-    return heuristic_state_reward + (partial_snake_score + complete_snake_score) * game->snake_reward_weight;
+    return heuristic_state_reward + monotonicity_reward * MONOTONICITY_REWARD_WEIGHT + snake_reward * game->snake_reward_weight;
 }
 
 void c_step(Game* game) {

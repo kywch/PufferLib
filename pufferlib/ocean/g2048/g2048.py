@@ -7,7 +7,8 @@ import pufferlib
 from pufferlib.ocean.g2048 import binding
 
 class G2048(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, reward_scaler=1.0, scaffolding_ratio=0.0, snake_reward_weight=0.0, render_mode=None, log_interval=128, buf=None, seed=0):
+    def __init__(self, num_envs=1, reward_scaler=1.0, scaffolding_ratio=0.0, snake_reward_weight=0.0,
+                 render_mode=None, log_interval=128, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=100, shape=(16*18 + 2,), dtype=np.uint8
         )

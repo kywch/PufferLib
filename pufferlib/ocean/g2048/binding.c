@@ -21,8 +21,8 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "lifetime_max_tile", log->lifetime_max_tile);
     assign_to_dict(dict, "reached_32768", log->reached_32768);
     assign_to_dict(dict, "reached_65536", log->reached_65536);
+    assign_to_dict(dict, "monotonicity_reward", log->monotonicity_reward);
     assign_to_dict(dict, "snake_state", log->snake_state);
-    assign_to_dict(dict, "partial_snake_reward", log->partial_snake_reward);
-    assign_to_dict(dict, "complete_snake_reward", log->complete_snake_reward);
+    assign_to_dict(dict, "snake_reward", log->snake_reward);
     return 0;
 }
