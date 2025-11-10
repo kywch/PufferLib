@@ -212,7 +212,7 @@ void c_reset(Game* game) {
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
         int num_curriculum = 5;
-        if (game->lifetime_max_tile >= 15) num_curriculum = 11;
+        if (game->lifetime_max_tile >= 15) num_curriculum = 13;
         int curriculum = rand() % num_curriculum;
 
         int pos = rand() % (SIZE * SIZE);
@@ -235,13 +235,22 @@ void c_reset(Game* game) {
                     game->grid[1][3] = 10;
                     game->empty_count--;
                 }
-            } else { // curriculum 5, 6, 7, 8, 9, 10
+
+            // These are for max tile >= 32k
+            } else if (curriculum == 5 || curriculum == 6) {
+                unsigned char tiles[] = {15, 14};
+                memcpy(game->grid[0], tiles, 2);
+                game->empty_count -= 2;
+            } else if (curriculum == 7 || curriculum == 8) {
+                unsigned char tiles[] = {15, 14, 13};
+                memcpy(game->grid[0], tiles, 3);
+                game->empty_count -= 3;
+            } else if (curriculum >= 9) {
                 unsigned char tiles[] = {15, 14, 13, 12};
                 memcpy(game->grid[0], tiles, 4);
                 game->empty_count -= 4;
-                int add_tail = curriculum % 3;
-                if (add_tail > 0) { // Add a snake tail
-                    game->grid[1][3] = 9 + add_tail;
+                if (curriculum < 11) {
+                    game->grid[1][3] = 1 + curriculum;
                     game->empty_count--;
                 }
             }
