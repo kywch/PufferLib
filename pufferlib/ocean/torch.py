@@ -925,6 +925,8 @@ class G2048(nn.Module):
                 nn.GELU(),
                 pufferlib.pytorch.layer_init(nn.Linear(2*hidden_size, hidden_size)),
                 nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+                nn.GELU(),
             )
 
         num_atns = env.single_action_space.n
