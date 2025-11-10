@@ -1,7 +1,10 @@
 #include "puffernet.h"
 
 typedef struct G2048Net G2048Net;
+
+// NOTE: Only valid up to 256
 struct G2048Net {
+    int hidden_dim;
     float* obs;
     Linear* layer1;
     GELU* gelu1;
@@ -9,10 +12,6 @@ struct G2048Net {
     GELU* gelu2;
     Linear* layer3;
     GELU* gelu3;
-    Linear* layer4;
-    GELU* gelu4;
-    Linear* layer5;
-    GELU* gelu5;
     Linear* actor_hidden;
     GELU* gelu_actor;
     Linear* actor_head;
@@ -23,25 +22,31 @@ struct G2048Net {
     Multidiscrete* multidiscrete;
 };
 
-G2048Net* make_g2048net(Weights* weights, int input_dim) {
+G2048Net* make_g2048net(Weights* weights, int input_dim, int hidden_dim) {
     G2048Net* net = calloc(1, sizeof(G2048Net));
     const int num_agents = 1;
     const int num_actions = 1;
     const int atn_sum = 4;
-    const int hidden_dim = 128;
+
     int logit_sizes[1] = {4};
     net->obs = calloc(num_agents*input_dim, sizeof(float));
+    net->hidden_dim = hidden_dim;
 
-    net->layer1 = make_linear(weights, num_agents, input_dim, 512);
-    net->gelu1 = make_gelu(num_agents, 512);
-    net->layer2 = make_linear(weights, num_agents, 512, 256);
-    net->gelu2 = make_gelu(num_agents, 256);
-    net->layer3 = make_linear(weights, num_agents, 256, 256);
-    net->gelu3 = make_gelu(num_agents, 256);
-    net->layer4 = make_linear(weights, num_agents, 256, 256);
-    net->gelu4 = make_gelu(num_agents, 256);
-    net->layer5 = make_linear(weights, num_agents, 256, hidden_dim);
-    net->gelu5 = make_gelu(num_agents, hidden_dim);
+    if (hidden_dim <= 256) {
+        net->layer1 = make_linear(weights, num_agents, input_dim, 512);
+        net->gelu1 = make_gelu(num_agents, 512);
+        net->layer2 = make_linear(weights, num_agents, 512, 256);
+        net->gelu2 = make_gelu(num_agents, 256);
+        net->layer3 = make_linear(weights, num_agents, 256, hidden_dim);
+        net->gelu3 = make_gelu(num_agents, hidden_dim);
+    } else {
+        net->layer1 = make_linear(weights, num_agents, input_dim, 2*hidden_dim);
+        net->gelu1 = make_gelu(num_agents, 2*hidden_dim);
+        net->layer2 = make_linear(weights, num_agents, 2*hidden_dim, hidden_dim);
+        net->gelu2 = make_gelu(num_agents, hidden_dim);
+        net->layer3 = make_linear(weights, num_agents, hidden_dim, hidden_dim);
+        net->gelu3 = make_gelu(num_agents, hidden_dim);
+    }
 
     net->actor_hidden = make_linear(weights, num_agents, hidden_dim, hidden_dim);
     net->gelu_actor = make_gelu(num_agents, hidden_dim);
@@ -64,10 +69,6 @@ void free_g2048net(G2048Net* net) {
     free(net->gelu2);
     free(net->layer3);
     free(net->gelu3);
-    free(net->layer4);
-    free(net->gelu4);
-    free(net->layer5);
-    free(net->gelu5);
 
     free(net->actor_hidden);
     free(net->gelu_actor);
@@ -84,6 +85,7 @@ void free_g2048net(G2048Net* net) {
 void forward_g2048net(G2048Net* net, unsigned char* observations, int* actions) {
     for (int i = 0; i < net->layer1->input_dim; i++) {
         net->obs[i] = (float)observations[i];
+        if (i < 16) net->obs[i] /= 100.0f;
     }
 
     linear(net->layer1, net->obs);
@@ -92,12 +94,8 @@ void forward_g2048net(G2048Net* net, unsigned char* observations, int* actions) 
     gelu(net->gelu2, net->layer2->output);
     linear(net->layer3, net->gelu2->output);
     gelu(net->gelu3, net->layer3->output);
-    linear(net->layer4, net->gelu3->output);
-    gelu(net->gelu4, net->layer4->output);
-    linear(net->layer5, net->gelu4->output);
-    gelu(net->gelu5, net->layer5->output);
 
-    lstm(net->lstm, net->gelu5->output);
+    lstm(net->lstm, net->gelu3->output);
 
     // Actor only. Don't need critic in inference
     linear(net->actor_hidden, net->lstm->state_h);

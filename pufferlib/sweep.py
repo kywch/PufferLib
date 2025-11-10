@@ -134,7 +134,7 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto', 'sweep_only', 'max_suggestion_cost'):
             continue
 
         assert isinstance(param, dict)
@@ -446,6 +446,7 @@ class Protein:
         # Process sweep config. NOTE: sweep_config takes precedence. It's not good.
         _use_gpu = sweep_config['use_gpu'] if 'use_gpu' in sweep_config else use_gpu
         _prune_pareto = sweep_config['prune_pareto'] if 'prune_pareto' in sweep_config else prune_pareto
+        _max_suggestion_cost = sweep_config['max_suggestion_cost'] if 'max_suggestion_cost' in sweep_config else max_suggestion_cost
 
         self.device = torch.device("cuda:0" if _use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
@@ -453,7 +454,7 @@ class Protein:
         self.suggestions_per_pareto = suggestions_per_pareto
         self.seed_with_search_center = seed_with_search_center
         self.resample_frequency = resample_frequency
-        self.max_suggestion_cost = max_suggestion_cost
+        self.max_suggestion_cost = _max_suggestion_cost
         self.expansion_rate = expansion_rate
         self.gp_training_iter = gp_training_iter
         self.gp_learning_rate = gp_learning_rate
