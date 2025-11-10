@@ -211,29 +211,39 @@ void c_reset(Game* game) {
     // Having high tiles saves moves to get there, allowing agents to experience it faster
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
-        int curriculum = rand() % 5;
-        if ((curriculum == 0 && game->lifetime_max_tile >= 14) ||
-            (game->lifetime_max_tile >= 15 && curriculum < 3)) {
-            // Fill the top row in decreasing order from the current max
-            for (int j = 0; j < SIZE; j++) {
-                // Fill the top row like {15, 14, 13, 12} or {14, 13, 12, 11}
-                game->grid[0][j] = game->lifetime_max_tile - j;
-                game->empty_count--;
-            }
+        int num_curriculum = 5;
+        if (game->lifetime_max_tile >= 15) num_curriculum = 7;
+        int curriculum = rand() % num_curriculum;
 
-            // Add a snake tail: either 1024 or 2048
-            if (game->lifetime_max_tile >= 15 && curriculum < 2) {
-                game->grid[1][3] = 10 + curriculum;
-                game->empty_count--;
-            }
+        int pos = rand() % (SIZE * SIZE);
+        int i = pos / SIZE;
+        int j = pos % SIZE;
 
-        } else {
-            int pos = rand() % (SIZE * SIZE);
-            int i = pos / SIZE;
-            int j = pos % SIZE;
+        if (game->lifetime_max_tile < 14) {
             // Spawn one high tiles from 8192, 16384, 32768, 65536
             game->grid[i][j] = max(12 + curriculum, game->lifetime_max_tile);            
             game->empty_count--;
+        } else {
+            if (curriculum < 3) {
+                game->grid[i][j] = 14 + curriculum; // Spawn one of 16384, 32768, 65536
+                game->empty_count--;
+            } else if (curriculum < 5) { // curriculum 3 or 4
+                unsigned char tiles[] = {14, 13, 12, 11};
+                memcpy(game->grid[0], tiles, 4);
+                game->empty_count -= 4;
+                if (curriculum == 4) { // Add a snake tail
+                    game->grid[1][3] = 10;
+                    game->empty_count--;
+                }
+            } else { // curriculum 5 or 6
+                unsigned char tiles[] = {15, 14, 13, 12};
+                memcpy(game->grid[0], tiles, 4);
+                game->empty_count -= 4;
+                if (curriculum == 6) { // Add a snake tail
+                    game->grid[1][3] = 11;
+                    game->empty_count--;
+                }
+            }
         }
 
     // Add two random tiles at the start - optimized version
@@ -437,8 +447,6 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
     game->empty_count = empty_count;
     game->max_tile = max_tile;
 
-    if (!game->use_heuristic_rewards) return 0.0f;
-
     /* Heuristic rewards */
 
     // Filled top row reward: A simple nudge to keep the top row filled
@@ -503,7 +511,10 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
             snake_reward = snake_tail * snake_tail;
         }
     }
-    
+
+    // Trained models need game->is_snake_state as obs
+    if (!game->use_heuristic_rewards) return 0.0f;
+
     game->monotonicity_reward += monotonicity_reward;
     game->snake_reward += snake_reward;
     
