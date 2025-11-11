@@ -58,6 +58,7 @@ typedef struct {
     float* rewards;                 // Required
     unsigned char* terminals;       // Required
 
+    bool can_go_over_65536;         // Set false for training, true for eval
     float reward_scaler;            // Pufferlib clips rew from -1 to 1, adjust the resulting rew accordingly
 
     float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
@@ -205,7 +206,7 @@ void c_reset(Game* game) {
     game->monotonicity_reward = 0;
     game->snake_reward = 0;
     game->is_snake_state = false;
-    game->stop_at_65536 = false;
+    game->stop_at_65536 = game->can_go_over_65536;
 
     if (game->terminals) game->terminals[0] = 0;
 
@@ -213,6 +214,7 @@ void c_reset(Game* game) {
     // Having high tiles saves moves to get there, allowing agents to experience it faster
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
+        // Going over 65536 is less useful for training
         game->stop_at_65536 = true;
         int num_curriculum = 5;
         if (game->lifetime_max_tile >= 14) num_curriculum = 11;

@@ -7,7 +7,7 @@ import pufferlib
 from pufferlib.ocean.g2048 import binding
 
 class G2048(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, reward_scaler=1.0, scaffolding_ratio=0.0,
+    def __init__(self, num_envs=1, can_go_over_65536=False, reward_scaler=1.0, scaffolding_ratio=0.0,
                  use_heuristic_rewards=False, snake_reward_weight=0.0,
                  render_mode=None, log_interval=128, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(
@@ -17,6 +17,8 @@ class G2048(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
+
+        self.can_go_over_65536 = can_go_over_65536
         self.reward_scaler = reward_scaler
         self.scaffolding_ratio = scaffolding_ratio
         self.use_heuristic_rewards = use_heuristic_rewards
@@ -26,6 +28,7 @@ class G2048(pufferlib.PufferEnv):
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed,
+            can_go_over_65536 = self.can_go_over_65536,
             reward_scaler = self.reward_scaler,
             scaffolding_ratio = self.scaffolding_ratio,
             use_heuristic_rewards = self.use_heuristic_rewards,
