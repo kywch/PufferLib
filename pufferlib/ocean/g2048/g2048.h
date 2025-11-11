@@ -212,7 +212,7 @@ void c_reset(Game* game) {
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
         int num_curriculum = 5;
-        if (game->lifetime_max_tile >= 15) num_curriculum = 13;
+        if (game->lifetime_max_tile >= 14) num_curriculum = 12;
         int curriculum = rand() % num_curriculum;
 
         int pos = rand() % (SIZE * SIZE);
@@ -227,31 +227,40 @@ void c_reset(Game* game) {
             if (curriculum < 3) { // curriculum 0, 1, 2
                 game->grid[i][j] = 14 + curriculum; // Spawn one of 16384, 32768, 65536
                 game->empty_count--;
-            } else if (curriculum < 5) {  // curriculum 3, 4
+
+            } else if (curriculum == 3) {
+                unsigned char tiles[] = {14, 13};
+                memcpy(game->grid[0], tiles, 2);
+                game->empty_count -= 2;
+            } else if (curriculum == 4) {
+                unsigned char tiles[] = {14, 13, 12};
+                memcpy(game->grid[0], tiles, 3);
+                game->empty_count -= 3;
+            } else if (curriculum == 5) {
                 unsigned char tiles[] = {14, 13, 12, 11};
                 memcpy(game->grid[0], tiles, 4);
                 game->empty_count -= 4;
-                if (curriculum == 4) { // Add a snake tail
-                    game->grid[1][3] = 10;
-                    game->empty_count--;
-                }
 
-            // These are for max tile >= 32k
-            } else if (curriculum == 5 || curriculum == 6) {
+            } else if (curriculum == 6) {
                 unsigned char tiles[] = {15, 14};
                 memcpy(game->grid[0], tiles, 2);
                 game->empty_count -= 2;
-            } else if (curriculum == 7 || curriculum == 8) {
+            } else if (curriculum == 7) {
                 unsigned char tiles[] = {15, 14, 13};
                 memcpy(game->grid[0], tiles, 3);
                 game->empty_count -= 3;
-            } else if (curriculum >= 9) {
+            } else if (curriculum >= 8) {
                 unsigned char tiles[] = {15, 14, 13, 12};
                 memcpy(game->grid[0], tiles, 4);
                 game->empty_count -= 4;
-                if (curriculum < 11) {
-                    game->grid[1][3] = 1 + curriculum;
-                    game->empty_count--;
+
+                // Practice the end game
+                if (curriculum >= 9) { game->grid[1][3] = 11; game->empty_count--; }
+                if (curriculum >= 10) { game->grid[1][2] = 10; game->empty_count--; }
+                if (curriculum >= 11) { 
+                    game->grid[1][1] = 9;
+                    game->grid[1][0] = 8;
+                    game->empty_count -= 2;
                 }
             }
         }
@@ -548,9 +557,10 @@ void c_step(Game* game) {
 
         update_observations(game); // Observations only change if the grid changes
         
-        // This is to limit infinite invalid moves during eval
+        // This is to limit infinite invalid moves during eval (happens for noob agents)
         // Don't need to be tight. Don't need to show to human player.
-        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 4);
+        int tick_multiplier = max(1, game->lifetime_max_tile - 8); // practically no limit for competent agent
+        game->max_episode_ticks = max(BASE_MAX_TICKS * tick_multiplier, game->score / 4);
 
     } else {
         reward = INVALID_MOVE_PENALTY;
