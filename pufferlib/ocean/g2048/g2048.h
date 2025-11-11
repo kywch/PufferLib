@@ -77,7 +77,7 @@ typedef struct {
     int max_episode_ticks;          // Dynamic max_ticks based on score
     bool is_snake_state;
     int snake_state_tick;
-    bool small_merge_reward;
+    bool stop_at_65536;
 
     // Cached values to avoid recomputation
     int empty_count;
@@ -205,7 +205,7 @@ void c_reset(Game* game) {
     game->monotonicity_reward = 0;
     game->snake_reward = 0;
     game->is_snake_state = false;
-    game->small_merge_reward = false;
+    game->stop_at_65536 = false;
 
     if (game->terminals) game->terminals[0] = 0;
 
@@ -213,6 +213,7 @@ void c_reset(Game* game) {
     // Having high tiles saves moves to get there, allowing agents to experience it faster
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
+        game->stop_at_65536 = true;
         int num_curriculum = 5;
         if (game->lifetime_max_tile >= 14) num_curriculum = 11;
         int curriculum = rand() % num_curriculum;
@@ -223,47 +224,48 @@ void c_reset(Game* game) {
 
         if (game->lifetime_max_tile < 14) {
             // Spawn one high tiles from 8192, 16384, 32768, 65536
-            game->grid[i][j] = max(12 + curriculum, game->lifetime_max_tile);            
+            unsigned char high_tile = max(12 + curriculum, game->lifetime_max_tile);
+            game->grid[i][j] = high_tile;
             game->empty_count--;
+            if (high_tile >= 16) game->stop_at_65536 = false;
         } else {
-            if (curriculum < 3) { // curriculum 0, 1, 2
-                game->grid[i][j] = 14 + curriculum; // Spawn one of 16384, 32768, 65536
+            if (curriculum < 2) { // curriculum 0, 1
+                game->grid[i][j] = 14 + curriculum; // Spawn one of 16384 or 32768
                 game->empty_count--;
 
-            } else if (curriculum == 3) {
+            } else if (curriculum == 2) {
                 unsigned char tiles[] = {14, 13};
                 memcpy(game->grid[0], tiles, 2);
                 game->empty_count -= 2;
-            } else if (curriculum == 4) {
+            } else if (curriculum == 3) {
                 unsigned char tiles[] = {14, 13, 12};
                 memcpy(game->grid[0], tiles, 3);
                 game->empty_count -= 3;
-            } else if (curriculum == 5) {
+            } else if (curriculum == 4) {
                 unsigned char tiles[] = {14, 13, 12, 11};
                 memcpy(game->grid[0], tiles, 4);
                 game->empty_count -= 4;
 
-            } else if (curriculum == 6) {
+            } else if (curriculum == 5) {
                 unsigned char tiles[] = {15, 14};
                 memcpy(game->grid[0], tiles, 2);
                 game->empty_count -= 2;
-            } else if (curriculum == 7) {
+            } else if (curriculum == 6) {
                 unsigned char tiles[] = {15, 14, 13};
                 memcpy(game->grid[0], tiles, 3);
                 game->empty_count -= 3;
-            } else if (curriculum >= 8) {
+            } else if (curriculum >= 7) {
                 unsigned char tiles[] = {15, 14, 13, 12};
                 memcpy(game->grid[0], tiles, 4);
                 game->empty_count -= 4;
 
                 // Practice the end game
-                if (curriculum >= 9) { game->grid[1][3] = 11; game->empty_count--; }
-                if (curriculum >= 10) { 
+                if (curriculum >= 8) { game->grid[1][3] = 11; game->empty_count--; }
+                if (curriculum >= 9) { 
                     game->grid[1][2] = 10;
                     game->grid[1][1] = 9;
                     game->grid[1][0] = 8;
                     game->empty_count -= 3;
-                    game->small_merge_reward = true;
                 }
             }
         }
@@ -334,15 +336,7 @@ static inline bool slide_and_merge(Game* game, unsigned char* row, float* reward
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-
-            if (game->small_merge_reward) {
-                // Practice the end game
-                *reward += MERGE_REWARD_WEIGHT;
-            } else {
-                // Normal reward
-                *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
-            }
-
+            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -580,7 +574,8 @@ void c_step(Game* game) {
 
     bool game_over = is_game_over(game);
     bool max_ticks_reached = game->tick >= game->max_episode_ticks;
-    game->terminals[0] = (game_over || max_ticks_reached) ? 1 : 0;
+    bool max_level_reached = game->stop_at_65536 && game->max_tile >= 16;
+    game->terminals[0] = (game_over || max_ticks_reached || max_level_reached) ? 1 : 0;
 
     // Game over penalty overrides other rewards
     if (game_over) {
