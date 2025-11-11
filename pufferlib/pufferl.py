@@ -182,10 +182,10 @@ class PuffeRL:
         if logger is None:
             self.logger = NoLogger(config)
 
-        # Learning rate scheduler: it reaches eta_min around ~80% epoch
+        # Learning rate scheduler
         epochs = config['total_timesteps'] // config['batch_size']
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs, eta_min=0.1*config['learning_rate'])
+            optimizer, T_max=epochs, eta_min=0.15*config['learning_rate'])
         self.total_epochs = epochs
 
         # Automatic mixed precision

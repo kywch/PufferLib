@@ -75,13 +75,14 @@ typedef struct {
     float snake_reward;
     int moves_made;
     int max_episode_ticks;          // Dynamic max_ticks based on score
+    bool is_snake_state;
+    int snake_state_tick;
+    bool small_merge_reward;
 
     // Cached values to avoid recomputation
     int empty_count;
     bool game_over_cached;
     bool grid_changed;
-    bool is_snake_state;
-    int snake_state_tick;
 } Game;
 
 // Precomputed color table for rendering optimization
@@ -204,6 +205,7 @@ void c_reset(Game* game) {
     game->monotonicity_reward = 0;
     game->snake_reward = 0;
     game->is_snake_state = false;
+    game->small_merge_reward = false;
 
     if (game->terminals) game->terminals[0] = 0;
 
@@ -212,7 +214,7 @@ void c_reset(Game* game) {
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
     if (game->is_scaffolding_episode) {
         int num_curriculum = 5;
-        if (game->lifetime_max_tile >= 14) num_curriculum = 12;
+        if (game->lifetime_max_tile >= 14) num_curriculum = 11;
         int curriculum = rand() % num_curriculum;
 
         int pos = rand() % (SIZE * SIZE);
@@ -256,11 +258,12 @@ void c_reset(Game* game) {
 
                 // Practice the end game
                 if (curriculum >= 9) { game->grid[1][3] = 11; game->empty_count--; }
-                if (curriculum >= 10) { game->grid[1][2] = 10; game->empty_count--; }
-                if (curriculum >= 11) { 
+                if (curriculum >= 10) { 
+                    game->grid[1][2] = 10;
                     game->grid[1][1] = 9;
                     game->grid[1][0] = 8;
-                    game->empty_count -= 2;
+                    game->empty_count -= 3;
+                    game->small_merge_reward = true;
                 }
             }
         }
@@ -311,7 +314,7 @@ void add_random_tile(Game* game) {
 }
 
 // Optimized slide and merge with fewer memory operations
-static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase) {
+static inline bool slide_and_merge(Game* game, unsigned char* row, float* reward, float* score_increase) {
     bool moved = false;
     int write_pos = 0;
     
@@ -331,7 +334,15 @@ static inline bool slide_and_merge(unsigned char* row, float* reward, float* sco
     for (int i = 0; i < SIZE - 1; i++) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
-            *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
+
+            if (game->small_merge_reward) {
+                // Practice the end game
+                *reward += MERGE_REWARD_WEIGHT;
+            } else {
+                // Normal reward
+                *reward += ((float)row[i]) * MERGE_REWARD_WEIGHT;
+            }
+
             *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
@@ -357,7 +368,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[idx][col];
             }
             
-            if (slide_and_merge(temp, reward, score_increase)) {
+            if (slide_and_merge(game, temp, reward, score_increase)) {
                 moved = true;
                 // Write back column
                 for (int i = 0; i < SIZE; i++) {
@@ -374,7 +385,7 @@ bool move(Game* game, int direction, float* reward, float* score_increase) {
                 temp[i] = game->grid[row][idx];
             }
             
-            if (slide_and_merge(temp, reward, score_increase)) {
+            if (slide_and_merge(game, temp, reward, score_increase)) {
                 moved = true;
                 // Write back row
                 for (int i = 0; i < SIZE; i++) {
