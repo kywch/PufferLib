@@ -61,10 +61,12 @@ typedef struct {
     bool can_go_over_65536;         // Set false for training, true for eval
     float reward_scaler;            // Pufferlib clips rew from -1 to 1, adjust the resulting rew accordingly
 
+    bool is_endgame_env;
     float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
     bool is_scaffolding_episode;
     bool use_heuristic_rewards;
     float snake_reward_weight;
+    bool use_sparse_reward;         // Ignore all rewards and provide 1 for reaching 16k, 32k, 65k
 
     int score;
     int tick;
@@ -126,6 +128,13 @@ void c_step(Game* env);
 void c_render(Game* env);
 void c_close(Game* env);
 
+void init(Game* env) {
+    env->lifetime_max_tile = 0;
+    // TODO: probably need an arg to turn this off later
+    env->is_endgame_env = false;
+    if (rand() % 100 < 2) env->is_endgame_env = true;
+}
+
 // Inline function for updating observations (avoid function call overhead)
 static inline void update_observations(Game* game) {
     // Observation: 4x4 grid, 18 features per cell
@@ -165,7 +174,7 @@ static inline void update_observations(Game* game) {
 
 void add_log(Game* game) {
     // Scaffolding runs will distort stats, so skip logging
-    if (game->is_scaffolding_episode) return;
+    if (game->is_endgame_env || game->is_scaffolding_episode) return;
 
     // Update the lifetime best
     if (game->max_tile > game->lifetime_max_tile) {
@@ -213,18 +222,20 @@ void c_reset(Game* game) {
     // Higher tiles are spawned in scaffolding episodes
     // Having high tiles saves moves to get there, allowing agents to experience it faster
     game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
-    if (game->is_scaffolding_episode) {
+    if (game->is_endgame_env || game->is_scaffolding_episode) {
         // Going over 65536 is less useful for training
         game->stop_at_65536 = true;
         int num_curriculum = 5;
         if (game->lifetime_max_tile >= 14) num_curriculum = 11;
         int curriculum = rand() % num_curriculum;
+        
+        if (game->is_endgame_env) curriculum = 7 + rand() % 4;
 
         int pos = rand() % (SIZE * SIZE);
         int i = pos / SIZE;
         int j = pos % SIZE;
 
-        if (game->lifetime_max_tile < 14) {
+        if (!game->is_endgame_env && game->lifetime_max_tile < 14) {
             // Spawn one high tiles from 8192, 16384, 32768, 65536
             unsigned char high_tile = max(12 + curriculum, game->lifetime_max_tile);
             game->grid[i][j] = high_tile;
@@ -550,6 +561,7 @@ static inline float update_stats_and_get_heuristic_rewards(Game* game) {
 void c_step(Game* game) {
     float reward = 0.0f;
     float score_add = 0.0f;
+    unsigned char prev_max_tile = game->max_tile;
     bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
     game->tick++;
 
@@ -582,6 +594,11 @@ void c_step(Game* game) {
     // Game over penalty overrides other rewards
     if (game_over) {
         reward = GAME_OVER_PENALTY;
+    }
+
+    if (game->use_sparse_reward) {
+        reward = 0; // Ignore all previous reward
+        if (game->max_tile >= 14 && game->max_tile > prev_max_tile) reward = 1;
     }
 
     game->rewards[0] = reward;
