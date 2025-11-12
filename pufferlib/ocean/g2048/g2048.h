@@ -134,8 +134,7 @@ void init(Game* game) {
     game->is_endgame_env = (rand() / (float)RAND_MAX) < game->endgame_env_prob;
 }
 
-// Inline function for updating observations (avoid function call overhead)
-static inline void update_observations(Game* game) {
+void update_observations(Game* game) {
     // Observation: 4x4 grid, 18 features per cell
     // 1. Normalized tile value (current_val / max_val)
     // 2. One-hot for empty (1 if empty, 0 if occupied)
@@ -194,38 +193,72 @@ void add_log(Game* game) {
     game->log.n += 1;
 }
 
+static inline unsigned char get_new_tile(void) {
+    // 10% chance of 2, 90% chance of 1
+    return (rand() % 10 == 0) ? 2 : 1;
+}
+
+static inline void place_tile_at_random_cell(Game* game, unsigned char tile) {
+    if (game->empty_count == 0) return;
+
+    int target = rand() % game->empty_count;
+    int pos = 0;
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            if (game->grid[i][j] == EMPTY) {
+                if (pos == target) {
+                    game->grid[i][j] = tile;
+                    game->empty_count--;
+                    return;
+                }
+                pos++;
+            }
+        }
+    }
+}
+
 void set_scaffolding_curriculum(Game* game) {
     game->stop_at_65536 = true;
-    int curriculum = rand() % 5;
-    int pos = rand() % (SIZE * SIZE);
-    int i = pos / SIZE;
-    int j = pos % SIZE;
 
     if (game->lifetime_max_tile < 14) {
+        int curriculum = rand() % 5;
+
         // Spawn one high tiles from 8192, 16384, 32768, 65536
         unsigned char high_tile = max(12 + curriculum, game->lifetime_max_tile);
-        game->grid[i][j] = high_tile;
-        game->empty_count--;
+        place_tile_at_random_cell(game, high_tile);
         if (high_tile >= 16) game->stop_at_65536 = false;
 
     } else {
-        if (curriculum < 2) { // curriculum 0, 1
-            game->grid[i][j] = 14 + curriculum; // Spawn one of 16384 or 32768
-            game->empty_count--;
+        int curriculum = rand() % 8;
 
-        // Place the tiles in the second row, so that they can be moved up in the first move
+        if (curriculum < 2) { // curriculum 0, 1
+            place_tile_at_random_cell(game, 14 + curriculum); // Spawn one of 16384 or 32768
+
         } else if (curriculum == 2) {
+            // Place the tiles in the second row, so that they can be moved up in the first move
             unsigned char tiles[] = {14, 13};
             memcpy(game->grid[1], tiles, 2);
             game->empty_count -= 2;
-        } else if (curriculum == 3) {
+        } else if (curriculum == 3) {  // harder
+            game->grid[1][0] = 14; game->empty_count--;
+            place_tile_at_random_cell(game, 13);
+
+        } else if (curriculum == 4) {
             unsigned char tiles[] = {15, 14};
             memcpy(game->grid[1], tiles, 2);
             game->empty_count -= 2;
-        } else if (curriculum == 4) {
+        } else if (curriculum == 5) {  // harder
+            game->grid[1][0] = 15; game->empty_count--;
+            place_tile_at_random_cell(game, 14);
+
+        } else if (curriculum == 6) {
             unsigned char tiles[] = {15, 14, 13};
             memcpy(game->grid[1], tiles, 3);
             game->empty_count -= 3;
+        } else if (curriculum == 7) {  // harder
+            game->grid[1][0] = 15; game->empty_count--;
+            place_tile_at_random_cell(game, 14);
+            place_tile_at_random_cell(game, 13);
         }
     }
 }
@@ -249,12 +282,7 @@ void set_endgame_curriculum(Game* game) {
 }
 
 void c_reset(Game* game) {
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            game->grid[i][j] = EMPTY;
-        }
-    }
-
+    memset(game->grid, EMPTY, SIZE * SIZE);
     game->score = 0;
     game->tick = 0;
     game->episode_reward = 0;
@@ -284,49 +312,14 @@ void c_reset(Game* game) {
             set_scaffolding_curriculum(game);
 
         } else {
-            // Add two random tiles at the start - optimized version
-            for (int added = 0; added < 2; ) {
-                int pos = rand() % (SIZE * SIZE);
-                int i = pos / SIZE;
-                int j = pos % SIZE;
-                if (game->grid[i][j] == EMPTY) {
-                    game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
-                    added++;
-                    game->empty_count--;
-                }
+            // Add two random tiles at the start
+            for (int i = 0; i < 2; i++) {
+                place_tile_at_random_cell(game, get_new_tile());
             }
         }
     }
 
     update_observations(game);
-}
-
-void add_random_tile(Game* game) {
-    if (game->empty_count == 0) return;
-    
-    // Use reservoir sampling for better performance
-    int chosen_pos = -1;
-    int count = 0;
-    
-    for (int pos = 0; pos < SIZE * SIZE; pos++) {
-        int i = pos / SIZE;
-        int j = pos % SIZE;
-        if (game->grid[i][j] == EMPTY) {
-            count++;
-            if (rand() % count == 0) {
-                chosen_pos = pos;
-            }
-        }
-    }
-    
-    if (chosen_pos >= 0) {
-        int i = chosen_pos / SIZE;
-        int j = chosen_pos % SIZE;
-        // Implement the 90% 2, 10% 4 rule
-        game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
-        game->empty_count--;
-        game->grid_changed = true;
-    }
 }
 
 // Optimized slide and merge with fewer memory operations
@@ -448,7 +441,7 @@ bool is_game_over(Game* game) {
 }
 
 // Combined grid stats and heuristic calculation for performance
-static inline float update_stats_and_get_heuristic_rewards(Game* game) {
+float update_stats_and_get_heuristic_rewards(Game* game) {
     int empty_count = 0;
     int top_row_count = 0;
     unsigned char max_tile = 0;
@@ -568,7 +561,7 @@ void c_step(Game* game) {
 
     if (did_move) {
         game->moves_made++;
-        add_random_tile(game);
+        place_tile_at_random_cell(game, get_new_tile());
         game->score += score_add;
 
         // Add heuristic rewards/penalties and update grid stats
@@ -620,7 +613,7 @@ void step_without_reset(Game* game) {
 
     if (did_move) {
         game->moves_made++;
-        add_random_tile(game);
+        place_tile_at_random_cell(game, get_new_tile());
         game->score += score_add;
         update_stats_and_get_heuristic_rewards(game); // The reward is ignored.
         update_observations(game); // Observations only change if the grid changes
