@@ -6,8 +6,8 @@
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->can_go_over_65536 = unpack(kwargs, "can_go_over_65536");
     env->reward_scaler = unpack(kwargs, "reward_scaler");
+    env->endgame_env_prob = unpack(kwargs, "endgame_env_prob");
     env->scaffolding_ratio = unpack(kwargs, "scaffolding_ratio");
-    env->scaffolding_ratio = max(min(env->scaffolding_ratio, 0.9f), 0.0f);
     env->use_heuristic_rewards = unpack(kwargs, "use_heuristic_rewards");
     env->snake_reward_weight = unpack(kwargs, "snake_reward_weight");
     env->use_sparse_reward = unpack(kwargs, "use_sparse_reward");
