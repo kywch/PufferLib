@@ -61,6 +61,7 @@ typedef struct {
     bool can_go_over_65536;         // Set false for training, true for eval
     float reward_scaler;            // Pufferlib clips rew from -1 to 1, adjust the resulting rew accordingly
 
+    float endgame_env_prob;         // The prob of env being initialized as an endgame-only env
     bool is_endgame_env;
     float scaffolding_ratio;        // The ratio for "scaffolding" runs, in which higher blocks are spawned
     bool is_scaffolding_episode;
@@ -123,16 +124,14 @@ static const unsigned char pow_1_5_lookup[20] = {
 void add_log(Game* game);
 
 // --- Required functions for env_binding.h ---
-void c_reset(Game* env);
-void c_step(Game* env);
-void c_render(Game* env);
-void c_close(Game* env);
+void c_reset(Game* game);
+void c_step(Game* game);
+void c_render(Game* game);
+void c_close(Game* game);
 
-void init(Game* env) {
-    env->lifetime_max_tile = 0;
-    // TODO: probably need an arg to turn this off later
-    env->is_endgame_env = false;
-    if (rand() % 100 < 2) env->is_endgame_env = true;
+void init(Game* game) {
+    game->lifetime_max_tile = 0;
+    game->is_endgame_env = (rand() / (float)RAND_MAX) < game->endgame_env_prob;
 }
 
 // Inline function for updating observations (avoid function call overhead)
@@ -195,6 +194,60 @@ void add_log(Game* game) {
     game->log.n += 1;
 }
 
+void set_scaffolding_curriculum(Game* game) {
+    game->stop_at_65536 = true;
+    int curriculum = rand() % 5;
+    int pos = rand() % (SIZE * SIZE);
+    int i = pos / SIZE;
+    int j = pos % SIZE;
+
+    if (game->lifetime_max_tile < 14) {
+        // Spawn one high tiles from 8192, 16384, 32768, 65536
+        unsigned char high_tile = max(12 + curriculum, game->lifetime_max_tile);
+        game->grid[i][j] = high_tile;
+        game->empty_count--;
+        if (high_tile >= 16) game->stop_at_65536 = false;
+
+    } else {
+        if (curriculum < 2) { // curriculum 0, 1
+            game->grid[i][j] = 14 + curriculum; // Spawn one of 16384 or 32768
+            game->empty_count--;
+
+        // Place the tiles in the second row, so that they can be moved up in the first move
+        } else if (curriculum == 2) {
+            unsigned char tiles[] = {14, 13};
+            memcpy(game->grid[1], tiles, 2);
+            game->empty_count -= 2;
+        } else if (curriculum == 3) {
+            unsigned char tiles[] = {15, 14};
+            memcpy(game->grid[1], tiles, 2);
+            game->empty_count -= 2;
+        } else if (curriculum == 4) {
+            unsigned char tiles[] = {15, 14, 13};
+            memcpy(game->grid[1], tiles, 3);
+            game->empty_count -= 3;
+        }
+    }
+}
+
+void set_endgame_curriculum(Game* game) {
+    game->stop_at_65536 = true;
+    int curriculum = rand() % 4;
+
+    // Place the tiles in the second-third rows, so that they can be moved up in the first move
+    unsigned char tiles[] = {15, 14, 13, 12};
+    memcpy(game->grid[1], tiles, 4);
+    game->empty_count -= 4;
+
+    if (curriculum >= 1) { game->grid[2][3] = 11; game->empty_count--; }
+    if (curriculum >= 2) { 
+        game->grid[2][2] = 10;
+        game->grid[2][1] = 9;
+        game->grid[2][0] = 8;
+        game->empty_count -= 3;
+    }
+}
+
 void c_reset(Game* game) {
     for (int i = 0; i < SIZE; i++) {
         for (int j = 0; j < SIZE; j++) {
@@ -219,80 +272,28 @@ void c_reset(Game* game) {
 
     if (game->terminals) game->terminals[0] = 0;
 
-    // Higher tiles are spawned in scaffolding episodes
-    // Having high tiles saves moves to get there, allowing agents to experience it faster
-    game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
-    if (game->is_endgame_env || game->is_scaffolding_episode) {
-        // Going over 65536 is less useful for training
-        game->stop_at_65536 = true;
-        int num_curriculum = 5;
-        if (game->lifetime_max_tile >= 14) num_curriculum = 11;
-        int curriculum = rand() % num_curriculum;
-        
-        if (game->is_endgame_env) curriculum = 7 + rand() % 4;
+    // End game envs only do endgame curriculum
+    if (game->is_endgame_env) {
+        set_endgame_curriculum(game);
 
-        int pos = rand() % (SIZE * SIZE);
-        int i = pos / SIZE;
-        int j = pos % SIZE;
-
-        if (!game->is_endgame_env && game->lifetime_max_tile < 14) {
-            // Spawn one high tiles from 8192, 16384, 32768, 65536
-            unsigned char high_tile = max(12 + curriculum, game->lifetime_max_tile);
-            game->grid[i][j] = high_tile;
-            game->empty_count--;
-            if (high_tile >= 16) game->stop_at_65536 = false;
-        } else {
-            if (curriculum < 2) { // curriculum 0, 1
-                game->grid[i][j] = 14 + curriculum; // Spawn one of 16384 or 32768
-                game->empty_count--;
-
-            } else if (curriculum == 2) {
-                unsigned char tiles[] = {14, 13};
-                memcpy(game->grid[0], tiles, 2);
-                game->empty_count -= 2;
-            } else if (curriculum == 3) {
-                unsigned char tiles[] = {14, 13, 12};
-                memcpy(game->grid[0], tiles, 3);
-                game->empty_count -= 3;
-            } else if (curriculum == 4) {
-                unsigned char tiles[] = {14, 13, 12, 11};
-                memcpy(game->grid[0], tiles, 4);
-                game->empty_count -= 4;
-
-            } else if (curriculum == 5) {
-                unsigned char tiles[] = {15, 14};
-                memcpy(game->grid[0], tiles, 2);
-                game->empty_count -= 2;
-            } else if (curriculum == 6) {
-                unsigned char tiles[] = {15, 14, 13};
-                memcpy(game->grid[0], tiles, 3);
-                game->empty_count -= 3;
-            } else if (curriculum >= 7) {
-                unsigned char tiles[] = {15, 14, 13, 12};
-                memcpy(game->grid[0], tiles, 4);
-                game->empty_count -= 4;
-
-                // Practice the end game
-                if (curriculum >= 8) { game->grid[1][3] = 11; game->empty_count--; }
-                if (curriculum >= 9) { 
-                    game->grid[1][2] = 10;
-                    game->grid[1][1] = 9;
-                    game->grid[1][0] = 8;
-                    game->empty_count -= 3;
-                }
-            }
-        }
-
-    // Add two random tiles at the start - optimized version
     } else {
-        for (int added = 0; added < 2; ) {
-            int pos = rand() % (SIZE * SIZE);
-            int i = pos / SIZE;
-            int j = pos % SIZE;
-            if (game->grid[i][j] == EMPTY) {
-                game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
-                added++;
-                game->empty_count--;
+        // Higher tiles are spawned in scaffolding episodes
+        // Having high tiles saves moves to get there, allowing agents to experience it faster
+        game->is_scaffolding_episode = (rand() / (float)RAND_MAX) < game->scaffolding_ratio;
+        if (game->is_scaffolding_episode) {
+            set_scaffolding_curriculum(game);
+
+        } else {
+            // Add two random tiles at the start - optimized version
+            for (int added = 0; added < 2; ) {
+                int pos = rand() % (SIZE * SIZE);
+                int i = pos / SIZE;
+                int j = pos % SIZE;
+                if (game->grid[i][j] == EMPTY) {
+                    game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
+                    added++;
+                    game->empty_count--;
+                }
             }
         }
     }
