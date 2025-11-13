@@ -5,18 +5,21 @@
 #define HIDDEN_DIM 512
 
 // Set NO_RENDER to true to run evals without the render
-#define NO_RENDER true
+#define NO_RENDER false
 #define NUM_EVAL_RUNS 200
 
 int main() {
     srand(time(NULL));
     Game env = {
+        .can_go_over_65536 = true,
         .reward_scaler = 0.0,
+        .endgame_env_prob = 0.0,
         .scaffolding_ratio = 0.0,
         .use_heuristic_rewards = false,
         .snake_reward_weight = 0.0,
-        .lifetime_max_tile = 0,
     };
+    init(&env);
+
     unsigned char observations[OBS_DIM] = {0};
     unsigned char terminals[1] = {0};
     int actions[1] = {0};
@@ -34,6 +37,7 @@ int main() {
     c_reset(&env);
     if (!NO_RENDER) c_render(&env);
     printf("Starting...\n");
+    
     clock_t start_time = clock();
 
     // Main game loop
@@ -67,7 +71,13 @@ int main() {
             double time_taken = (double)(end_time - start_time) / CLOCKS_PER_SEC;
             printf("Trial: %d, Ticks: %d, Max Tile: %d, Merge Score: %d, Time: %.2fs\n",
                 trial++, env.tick, 1 << env.max_tile, env.score, time_taken);
-            if (!NO_RENDER) WaitTime(10);
+            
+            if (!NO_RENDER) {
+                // Reached the 65536 tile, so full stop. Savor the moment!
+                if (env.max_tile >= 16) WaitTime(100000);
+                WaitTime(10);
+            }
+
             c_reset(&env);
             if (!NO_RENDER) c_render(&env);
             start_time = clock();
