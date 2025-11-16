@@ -9,7 +9,7 @@ import psutil
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
 from pufferlib import PufferEnv, set_buffers
 import pufferlib.spaces
-import gymnasium
+from pufferlib.utils import unroll_nested_dict
 
 RESET = 0
 STEP = 1
@@ -99,7 +99,7 @@ class Serial:
     def _avg_infos(self):
         infos = {}
         for e in self.infos:
-            for k, v in pufferlib.unroll_nested_dict(e):
+            for k, v in unroll_nested_dict(e):
                 if k not in infos:
                     infos[k] = []
 

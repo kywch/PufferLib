@@ -1,23 +1,12 @@
-import os
-import sys
-import warnings
-
-from contextlib import redirect_stdout, redirect_stderr, contextmanager
-from types import SimpleNamespace
-from collections.abc import Mapping
-from io import StringIO
-from functools import wraps
-
 import numpy as np
 import gymnasium
-
 import pufferlib.spaces
+
 
 ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
 calling super() before you have assigned the attribute.
 '''
-
 
 def set_buffers(env, buf=None):
     if buf is None:
@@ -150,7 +139,6 @@ class ClipAction(gymnasium.Wrapper):
     def step(self, action):
         action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         return self.env.step(action)
-
 
 class EpisodeStats(gymnasium.Wrapper):
     '''Wrapper for Gymnasium environments that stores
@@ -326,6 +314,7 @@ class MultiagentEpisodeStats(PettingZooWrapper):
                         pass
 
         return observations, rewards, terminations, truncations, all_infos
+
 ### Exceptions
 class EnvironmentSetupError(RuntimeError):
     def __init__(self, e, package):
@@ -404,55 +393,3 @@ class PettingZooTruncatedWrapper:
 
     def close(self):
         self.env.close()
-
-### Misc
-def unroll_nested_dict(d):
-    if not isinstance(d, dict):
-        return d
-
-    for k, v in d.items():
-        if isinstance(v, dict):
-            for k2, v2 in unroll_nested_dict(v):
-                yield f"{k}/{k2}", v2
-        else:
-            yield k, v
-
-def silence_warnings(original_func, category=DeprecationWarning):
-    @wraps(original_func)
-    def wrapper(*args, **kwargs):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=category)
-            return original_func(*args, **kwargs)
-    return wrapper
-
-class Suppress():
-    def __init__(self):
-        self.f = StringIO()
-        self.null_1 = os.open(os.devnull, os.O_WRONLY | os.O_TRUNC | os.O_CREAT)
-        self.null_2 = os.open(os.devnull, os.O_WRONLY | os.O_TRUNC | os.O_CREAT)
-
-    def __enter__(self):
-        # Suppress C library outputs
-        self.orig_stdout = os.dup(1)
-        self.orig_stderr = os.dup(2)
-        os.dup2(self.null_1, 1)
-        os.dup2(self.null_2, 2)
-
-        # Suppress Python outputs
-        self._stdout_redirector = redirect_stdout(self.f)
-        self._stderr_redirector = redirect_stderr(self.f)
-        self._stdout_redirector.__enter__()
-        self._stderr_redirector.__enter__()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # Enable C library outputs
-        os.dup2(self.orig_stdout, 1)
-        os.dup2(self.orig_stderr, 2)
-        os.close(self.orig_stdout)
-        os.close(self.orig_stderr)
-        os.close(self.null_1)
-        os.close(self.null_2)
-
-        # Enable Python outputs
-        self._stdout_redirector.__exit__(exc_type, exc_val, exc_tb)
-        self._stderr_redirector.__exit__(exc_type, exc_val, exc_tb)
