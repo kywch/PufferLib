@@ -1068,12 +1068,14 @@ def sweep(args=None, env_name=None):
 
     def stop_if_perf_below(logs):
         if stop_if_loss_nan(logs):
+            logs['is_loss_nan'] = True
             return True
 
         if ('uptime' in logs and target_key in logs):
             threshold = sweep.get_early_stop_threshold(logs['uptime'])
             logs['early_stop_treshold'] = max(threshold, 0)  # clipping for visualization
             if logs[target_key] < threshold:
+                logs['is_loss_nan'] = False
                 return True
         return False
 
@@ -1100,7 +1102,8 @@ def sweep(args=None, env_name=None):
         costs = downsample([log['uptime'] for log in all_logs], points_per_run)
         timesteps = downsample([log['agent_steps'] for log in all_logs], points_per_run)
 
-        if len(timesteps) > 0 and timesteps[-1] < 0.7 * total_timesteps:  # 0.7 is arbitrary
+        is_final_loss_nan = all_logs[-1].get('is_loss_nan', False)
+        if is_final_loss_nan:
             s = scores.pop()
             c = costs.pop()
             args['train']['total_timesteps'] = timesteps.pop()
