@@ -436,12 +436,13 @@ class ParetoLogCostModel:
     """
     def __init__(self, min_allowed_cost=600):
         self.min_allowed_cost = max(min_allowed_cost, EPSILON)
-        self.min_log_cost = np.log(self.min_allowed_cost)
+        self.logmin_allowed_cost = np.log(self.min_allowed_cost)
         self.max_threshold_fraction = 0.8
         self.is_fitted = False
         self.A = None
         self.B = None
         self.max_log_cost = None
+        self.max_score = None
 
     def fit(self, pareto_obs):
         self.is_fitted = False
@@ -453,6 +454,7 @@ class ParetoLogCostModel:
         costs = np.array([e['cost'] for e in pareto_obs])
         x_log_c = np.log(np.maximum(costs, EPSILON))
         self.max_log_cost = x_log_c.max()
+        self.max_score = scores.max()
 
         try:
             self.B, self.A = np.polyfit(x_log_c, scores, 1)
@@ -464,20 +466,19 @@ class ParetoLogCostModel:
         if not self.is_fitted or cost < self.min_allowed_cost:
             return -np.inf
 
-        log_c = np.log(np.maximum(cost, EPSILON))
-        log_c_clipped = min(log_c, self.max_log_cost)
-        predicted_pareto_score = self.A + self.B * log_c_clipped
-
-        # Threshold increases as cost increases: lenient on early exploration, strict on later phase.
-        cost_range = self.max_log_cost - self.min_log_cost
+        cost_range = self.max_log_cost - self.logmin_allowed_cost
         if cost_range <= EPSILON:
             # Somehow sweep found an excellent hyperparam that solves within min cost
-            threshold_fraction = self.max_threshold_fraction
+            threshold = self.max_threshold_fraction * self.max_score
+        
+        # Threshold increases as cost increases: lenient on early exploration, strict on later phase.
         else:
-            threshold_fraction = (log_c - self.min_log_cost) / cost_range
-            threshold_fraction = np.clip(threshold_fraction, 0, self.max_threshold_fraction)
+            log_c = np.log(cost) if cost > self.min_allowed_cost else self.logmin_allowed_cost
+            predicted_pareto_score = min(self.A + self.B * log_c, self.max_score)
+            threshold_fraction = self.max_threshold_fraction * (log_c - self.logmin_allowed_cost) / cost_range
+            threshold = threshold_fraction * predicted_pareto_score
 
-        return threshold_fraction * predicted_pareto_score
+        return threshold
 
 
 # TODO: Eval defaults
