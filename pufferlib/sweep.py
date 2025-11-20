@@ -435,8 +435,8 @@ class ParetoLogCostModel:
     Returns a fraction of the predicted Pareto score as the stop threshold.
     """
     def __init__(self, min_allowed_cost=600):
-        self.min_allowed_cost = min(min_allowed_cost, EPSILON)
-        self.min_log_cost = np.log(min_allowed_cost)
+        self.min_allowed_cost = max(min_allowed_cost, EPSILON)
+        self.min_log_cost = np.log(self.min_allowed_cost)
         self.max_threshold_fraction = 0.8
         self.is_fitted = False
         self.A = None
@@ -465,7 +465,8 @@ class ParetoLogCostModel:
             return -np.inf
 
         log_c = np.log(np.maximum(cost, EPSILON))
-        predicted_pareto_score = self.A + self.B * log_c
+        log_c_clipped = min(log_c, self.max_log_cost)
+        predicted_pareto_score = self.A + self.B * log_c_clipped
 
         # Threshold increases as cost increases: lenient on early exploration, strict on later phase.
         cost_range = self.max_log_cost - self.min_log_cost
