@@ -57,7 +57,7 @@
 #define TEST_BIT(mask, i)   ( ((mask)[(i)/8] & (1 << ((i)%8))) != 0 )
 
 // BFS
-#define MAX_BFS_SIZE 10000000
+#define MAX_BFS_SIZE 40000000
 #define MAX_NEIGHBORS 6 // based on action space
 
 // hash table 
@@ -1081,6 +1081,11 @@ int bfs(PuzzleState* start, int maxDepth, Level* lvl, int min_moves) {
         for (int i = 0; i < nCount; i++) {
             PuzzleState* nxt = &neighbors[i].state;
             if (!isVisited(nxt)) {
+                if (back >= MAX_BFS_SIZE) {
+                    printf("BFS queue overflow on add! Aborting search for this level.\n");
+                    free(nxt->blocks); // Free the state we are not adding
+                    continue; // Skip adding more neighbors
+                }
                 markVisited(nxt);
                 neighbors[i].depth = current.depth + 1;
                 neighbors[i].parent = currentIndex;
@@ -2128,6 +2133,49 @@ void c_render(CTowerClimb* env) {
     process_animation_frame(client, env);
     update_camera(client, env);
     render_scene(client, env);
+}
+
+void save_levels(Level* levels, int num_maps_to_add, const char* path, int is_first_batch);
+
+Level* load_levels_from_file(int* num_maps, const char* path) {
+    FILE* fp = fopen(path, "rb");
+    if (fp == NULL) {
+        perror("Failed to open file for reading");
+        *num_maps = 0;
+        return NULL;
+    }
+
+    if (fread(num_maps, sizeof(int), 1, fp) != 1) {
+        fprintf(stderr, "Failed to read map count from %s\n", path);
+        fclose(fp);
+        *num_maps = 0;
+        return NULL;
+    }
+
+    Level* levels = calloc(*num_maps, sizeof(Level));
+    if (levels == NULL) {
+        fprintf(stderr, "Failed to allocate memory for levels\n");
+        fclose(fp);
+        *num_maps = 0;
+        return NULL;
+    }
+
+    for (int i = 0; i < *num_maps; i++) {
+        // Read struct fields individually to match the save order
+        fread(&levels[i].rows, sizeof(int), 1, fp);
+        fread(&levels[i].cols, sizeof(int), 1, fp);
+        fread(&levels[i].size, sizeof(int), 1, fp);
+        fread(&levels[i].total_length, sizeof(int), 1, fp);
+        fread(&levels[i].goal_location, sizeof(int), 1, fp);
+        fread(&levels[i].spawn_location, sizeof(int), 1, fp);
+
+        // Allocate and read the map data
+        levels[i].map = calloc(BLOCK_BYTES, sizeof(unsigned char));
+        fread(levels[i].map, sizeof(unsigned char), BLOCK_BYTES, fp);
+    }
+
+    fclose(fp);
+    return levels;
 }
 
 void close_client(Client* client) {

@@ -5,30 +5,39 @@
 #include "../env_binding.h"
 
 static PyObject* my_shared(PyObject* self, PyObject* args, PyObject* kwargs) {
-    int num_maps = unpack(kwargs, "num_maps");
-    Level* levels = calloc(num_maps, sizeof(Level));
+    const char* path = "resources/tower_climb/maps.bin";
+    int num_maps = 0;
+
+    Level* levels = load_levels_from_file(&num_maps, path);
+    if (levels == NULL) {
+        PyErr_SetString(PyExc_IOError, "Failed to load maps from maps.bin. Did you run './tower_climb' to pregenerate them?");
+        return NULL;
+    }
+
     PuzzleState* puzzle_states = calloc(num_maps, sizeof(PuzzleState));
 
     for (int i = 0; i < num_maps; i++) {
-        int goal_height = rand() % 4 + 5;
-        int min_moves = 10;
-        int max_moves = 15;
-        init_level(&levels[i]);
         init_puzzle_state(&puzzle_states[i]);
-        cy_init_random_level(&levels[i], goal_height, max_moves, min_moves, i);
         levelToPuzzleState(&levels[i], &puzzle_states[i]);
     }
 
     PyObject* levels_handle = PyLong_FromVoidPtr(levels);
     PyObject* puzzles_handle = PyLong_FromVoidPtr(puzzle_states);
+    PyObject* num_maps_obj = PyLong_FromLong(num_maps);
     PyObject* state = PyDict_New();
     PyDict_SetItemString(state, "levels", levels_handle);
     PyDict_SetItemString(state, "puzzles", puzzles_handle);
+    PyDict_SetItemString(state, "num_maps", num_maps_obj);
     return PyLong_FromVoidPtr(state);
 }
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->num_maps = unpack(kwargs, "num_maps");
+    // num_maps is loaded from the file, but we can still unpack it from kwargs
+    // to know how many maps were intended to be loaded.
+    // This is useful for consistency checks if needed later.
+    // For now, the actual number of maps is determined by load_levels.
+    // unpack(kwargs, "num_maps"); // No longer needed from kwargs
+
     env->reward_climb_row = unpack(kwargs, "reward_climb_row");
     env->reward_fall_row = unpack(kwargs, "reward_fall_row");
     env->reward_illegal_move = unpack(kwargs, "reward_illegal_move");
@@ -76,6 +85,19 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
         return 1;
     }
     env->all_levels = (Level*)PyLong_AsVoidPtr(levels_obj);
+
+    PyObject* num_maps_obj = PyDict_GetItemString(state_dict, "num_maps");
+    if (num_maps_obj == NULL) {
+        PyErr_SetString(PyExc_KeyError, "Key 'num_maps' not found in state");
+        return 1;
+    }
+    if (!PyLong_Check(num_maps_obj)) {
+        PyErr_SetString(PyExc_TypeError, "'num_maps' must be an integer");
+        return 1;
+    }
+    if (env->all_levels != NULL) {
+        env->num_maps = PyLong_AsLong(num_maps_obj);
+    }
 
     PyObject* puzzles_obj = PyDict_GetItemString(state_dict, "puzzles");
     if (!PyObject_TypeCheck(puzzles_obj, &PyLong_Type)) {
