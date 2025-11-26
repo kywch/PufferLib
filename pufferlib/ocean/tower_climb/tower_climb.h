@@ -89,7 +89,7 @@ static const int wrap_orientation[4][2] = {
 
 typedef struct Level Level;
 struct Level {
-    int* map;
+    unsigned char* map;
     int rows;
     int cols;
     int size;
@@ -99,7 +99,7 @@ struct Level {
 };
 
 void init_level(Level* lvl){
-	lvl->map = calloc(1000,sizeof(unsigned int));
+	lvl->map = calloc(BLOCK_BYTES, sizeof(unsigned char));
     lvl->rows = 10;
     lvl->cols = 10;
     lvl->size = 100;
@@ -111,7 +111,7 @@ void init_level(Level* lvl){
 void reset_level(Level* lvl){
     lvl->goal_location = 999;
     lvl->spawn_location = 0;
-    memset(lvl->map, 0, 1000 * sizeof(unsigned int));
+    memset(lvl->map, 0, BLOCK_BYTES * sizeof(unsigned char));
 }
 
 void free_level(Level* lvl){
@@ -193,12 +193,7 @@ void add_log(CTowerClimb* env) {
 }
 
 void levelToPuzzleState(Level* level, PuzzleState* state) {
-    memset(state->blocks, 0, BLOCK_BYTES);
-    for (int i = 0; i < level->total_length; i++) {
-        if (level->map[i] == 1) {
-            SET_BIT(state->blocks, i);
-        }
-    }
+    memcpy(state->blocks, level->map, BLOCK_BYTES);
     state->robot_position = level->spawn_location;
     state->robot_orientation = UP;  
     state->robot_state = 0;        
@@ -227,7 +222,7 @@ void setPuzzle(CTowerClimb* env, PuzzleState* src, Level* lvl){
 	env->state->robot_orientation = src->robot_orientation;
 	env->state->robot_state = src->robot_state;
 	env->state->block_grabbed = src->block_grabbed; 
-    memcpy(env->level->map, lvl->map, lvl->total_length * sizeof(int));
+    memcpy(env->level->map, lvl->map, BLOCK_BYTES);
     env->level->rows = lvl->rows;
     env->level->cols = lvl->cols;
     env->level->size = lvl->size;
@@ -350,9 +345,9 @@ void c_reset(CTowerClimb* env) {
     } else {
         // Emergency fallback: use a simple default level
         env->level->goal_location = 999;
-        env->level->spawn_location = 0;
-        memset(env->level->map, 0, env->level->total_length * sizeof(int));
-        env->level->map[0] = 1;  // Ground block
+        env->level->spawn_location = 100; // Spawn above the ground block
+        memset(env->level->map, 0, BLOCK_BYTES);
+        SET_BIT(env->level->map, 0);  // Ground block
         levelToPuzzleState(env->level, env->state);
     }
     
@@ -1146,23 +1141,22 @@ void gen_level(Level* lvl, int goal_level) {
                 int allowed_block_placement = within_legal_bounds && (z <= (legal_depth_size - y));
                 if (allowed_block_placement){
                     int chance = (rand() % 2 ==0) ? 1 : 0;
-                    lvl->map[block_index] = chance;
+                    if (chance) SET_BIT(lvl->map, block_index);
                     // create spawn point above an existing block
-                    if (spawn_created == 0 && y == 2 && lvl->map[block_index - area] == 1){
+                    if (spawn_created == 0 && y == 2 && TEST_BIT(lvl->map, block_index - area)){
                         spawn_created = 1;
                         spawn_index = block_index;
-                        lvl->map[spawn_index] = 0;
+                        CLEAR_BIT(lvl->map, spawn_index);
                     }
                 }
                 if (!goal_created && y == goal_level && 
-                    (lvl->map[block_index + col_max - area] == 1 || 
-                     lvl->map[block_index - 1 - area] == 1 || 
-                     lvl->map[block_index + 1 - area] == 1)) {
+                    (TEST_BIT(lvl->map, block_index + col_max - area) || 
+                     TEST_BIT(lvl->map, block_index - 1 - area) || 
+                     TEST_BIT(lvl->map, block_index + 1 - area))) {
                     // 33% chance to place goal here, unless we're at the last valid position
                     if (rand() % 3 == 0 || (x == col_max-1 && z == 0)) {
                         goal_created = 1;
                         goal_index = block_index;
-                        lvl->map[goal_index] = 2;
                     }
                 }
             }
@@ -1201,6 +1195,7 @@ void cy_init_random_level(Level* level, int goal_level, int max_moves, int min_m
     gen_level(level, goal_level);
     // guarantee a map is created
     while(level->spawn_location == 0 || level->goal_location == 999 || verify_level(level,max_moves, min_moves) == 0){
+        reset_level(level);
         gen_level(level, goal_level);
     }
 }
