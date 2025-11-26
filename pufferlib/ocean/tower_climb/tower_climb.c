@@ -198,51 +198,6 @@ void demo() {
     free(puzzle_states);
 }
 
-void save_levels(Level* levels, int num_maps_to_add, const char* path, int is_first_batch) {
-    int total_maps = num_maps_to_add;
-    FILE* fp;
-
-    if (is_first_batch) {
-        fp = fopen(path, "wb");
-        if (fp == NULL) {
-            perror("Failed to open file for writing");
-            return;
-        }
-        fwrite(&total_maps, sizeof(int), 1, fp);
-    } else {
-        fp = fopen(path, "r+b"); // Open for reading and writing
-        if (fp == NULL) {
-            perror("Failed to open file for appending");
-            return;
-        }
-        int existing_maps = 0;
-        fread(&existing_maps, sizeof(int), 1, fp);
-        total_maps += existing_maps;
-        fseek(fp, 0, SEEK_SET); // Go back to the beginning to update the count
-        fwrite(&total_maps, sizeof(int), 1, fp);
-        fseek(fp, 0, SEEK_END); // Go to the end to append new maps
-    }
-
-    if (fp == NULL) {
-        return;
-    }
-
-    for (int i = 0; i < num_maps_to_add; i++) {
-        // Write struct fields individually to avoid padding/ordering issues
-        fwrite(&levels[i].rows, sizeof(int), 1, fp);
-        fwrite(&levels[i].cols, sizeof(int), 1, fp);
-        fwrite(&levels[i].size, sizeof(int), 1, fp);
-        fwrite(&levels[i].total_length, sizeof(int), 1, fp);
-        fwrite(&levels[i].goal_location, sizeof(int), 1, fp);
-        fwrite(&levels[i].spawn_location, sizeof(int), 1, fp);
-        // Write the map data separately
-        fwrite(levels[i].map, sizeof(unsigned char), BLOCK_BYTES, fp);
-    }
-
-    fclose(fp);
-    printf("Saved/Appended %d maps. Total maps in %s: %d\n", num_maps_to_add, path, total_maps);
-}
-
 void performance_test() {
     long test_time = 10;
     CTowerClimb* env = allocate();
@@ -260,42 +215,7 @@ void performance_test() {
     free_allocated(env);
 }
 
-void pregenerate_maps(int total_maps, int batch_size) {
-    if (total_maps <= 0 || batch_size <= 0) {
-        fprintf(stderr, "Number of maps must be positive.\n");
-        return;
-    }
-
-    for (int i = 0; i < total_maps; i += batch_size) {
-        int current_batch_size = (i + batch_size > total_maps) ? (total_maps - i) : batch_size;
-        printf("\n--- Generating batch starting at map %d (%d maps) ---\n", i, current_batch_size);
-
-        Level* levels = calloc(current_batch_size, sizeof(Level));
-        for (int j = 0; j < current_batch_size; j++) {
-            init_level(&levels[j]);
-            int goal_height = rand() % 4 + 5;
-            int min_moves = 10;
-            int max_moves = 30;
-            int map_index = i + j;
-            if ((j + 1) % 10 == 0 || j == current_batch_size - 1) printf("Generating level %d/%d...\n", map_index + 1, total_maps);
-            cy_init_random_level(&levels[j], goal_height, max_moves, min_moves, map_index);
-        }
-
-        save_levels(levels, current_batch_size, "maps.bin", i == 0);
-
-        for (int j = 0; j < current_batch_size; j++) {
-            free(levels[j].map);
-        }
-        free(levels);
-    }
-}
-
 int main() {
-    // To generate maps, uncomment the line below and compile/run
-    // Generates 20000 maps in batches of 1000
-    pregenerate_maps(20000, 1000);
-
-    // To run the demo, uncomment the line below and compile/run
-    // demo();
+    demo();
     return 0;
 }

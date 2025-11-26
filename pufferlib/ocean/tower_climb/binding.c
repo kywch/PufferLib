@@ -1,7 +1,13 @@
+#include <Python.h>
+
 #include "tower_climb.h"
 
 #define Env CTowerClimb
 #define MY_SHARED
+
+static PyObject* py_generate_one_map(PyObject* self, PyObject* args);
+#define MY_METHODS {"generate_one_map", py_generate_one_map, METH_VARARGS, "Generate one tower climb map."}
+
 #include "../env_binding.h"
 
 static PyObject* my_shared(PyObject* self, PyObject* args, PyObject* kwargs) {
@@ -112,6 +118,42 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->all_puzzles = puzzles;
 
     return 0;
+}
+
+static PyObject* py_generate_one_map(PyObject* self, PyObject* args) {
+    int seed;
+    if (!PyArg_ParseTuple(args, "i", &seed)) {
+        return NULL; // PyArg_ParseTuple sets the error
+    }
+
+    Level level;
+    init_level(&level);
+
+    // Generation parameters from generate_maps.py
+    int goal_height = 5 + (seed % 4);
+    int min_moves = 10;
+    int max_moves = 30;
+
+    cy_init_random_level(&level, goal_height, max_moves, min_moves, seed);
+
+    // Package the map data into a Python tuple
+    PyObject* map_data_obj = PyBytes_FromStringAndSize((const char*)level.map, BLOCK_BYTES);
+    if (map_data_obj == NULL) {
+        free(level.map);
+        return NULL;
+    }
+
+    PyObject* result_tuple = Py_BuildValue(
+        "Oiiiiii",
+        map_data_obj,
+        level.rows, level.cols, level.size,
+        level.total_length, level.goal_location, level.spawn_location
+    );
+
+    Py_DECREF(map_data_obj); // Py_BuildValue increments ref count
+    free(level.map); // Free the C-level map memory
+
+    return result_tuple;
 }
 
 static int my_log(PyObject* dict, Log* log) {
