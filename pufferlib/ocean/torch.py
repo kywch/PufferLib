@@ -910,10 +910,11 @@ class G2048(nn.Module):
         self.is_continuous = False
 
         self.embed_dim = int(np.ceil(33**0.25))
-        self.num_obs = 16 * self.embed_dim  # 4x4 grid with one-hot encoding of 16 values
+        self.num_grid_cell = 4*4
+        self.num_obs = self.num_grid_cell * self.embed_dim + 3  # target_states
 
         self.value_embed = torch.nn.Embedding(18, self.embed_dim)
-        self.pos_embed = torch.nn.Embedding(16, self.embed_dim)
+        self.pos_embed = torch.nn.Embedding(self.num_grid_cell, self.embed_dim)
 
         self.encoder = torch.nn.Sequential(
             torch.nn.Flatten(),
@@ -946,11 +947,14 @@ class G2048(nn.Module):
         return self.forward_eval(observations, state)
 
     def encode_observations(self, observations, state=None):
-        value_obs = self.value_embed(observations.long())
+        value_obs = self.value_embed(observations[:, :self.num_grid_cell].long())
         pos_obs = self.pos_embed.weight.expand(*value_obs.shape)
-        observations = value_obs + pos_obs
+        grid_obs = (value_obs + pos_obs).flatten(1)  # (batch, 48)
 
-        return self.encoder(observations)
+        target_states = observations[:, self.num_grid_cell:].float()  # (batch, 3)
+
+        combined = torch.cat([grid_obs, target_states], dim=1)  # (batch, 51)
+        return self.encoder(combined)
 
     def decode_actions(self, hidden):
         logits = self.decoder(hidden)

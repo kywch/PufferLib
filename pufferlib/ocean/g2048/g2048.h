@@ -23,14 +23,9 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define GAME_OVER_PENALTY -1.0f
 
 // These may need experimenting, but work for now
-#define STATE_REWARD_WEIGHT 0.1f // Fixed, small reward for maintaining "desirable" states
+#define STATE_REWARD_WEIGHT 0.05f // Fixed reward for maintaining "desirable" states
 #define MONOTONICITY_REWARD_WEIGHT 0.00003f
 
-// Features: 18 per cell
-// 1. Normalized tile value (current_val / max_val)
-// 2. One-hot for empty (1 if empty, 0 if occupied)
-// 3-18. One-hot for tile values 2^1 to 2^16 (16 features)
-#define NUM_FEATURES 18
 
 static inline float calculate_perf(unsigned char max_tile) {
     // Reaching 65k -> 1.0, 32k -> 0.8, 16k -> 0.4, 8k -> 0.2, 4k -> 0.1, 2k -> 0.05
@@ -88,10 +83,13 @@ typedef struct {
     int snake_state_tick;
     bool stop_at_65536;
 
+    unsigned char target_states[3];          // special states for state rew
+
     // Cached values to avoid recomputation
     int empty_count;
     bool game_over_cached;
     bool grid_changed;
+
 } Game;
 
 // Precomputed color table for rendering optimization
@@ -137,11 +135,13 @@ void c_close(Game* game);
 void init(Game* game) {
     game->lifetime_max_tile = 0;
     game->is_endgame_env = (rand() / (float)RAND_MAX) < game->endgame_env_prob;
-    memset(game->grid, 0, SIZE * SIZE * sizeof(unsigned char));
+    memset(game->grid, 0, SIZE * SIZE);
 }
 
 void update_observations(Game* game) {
-    memcpy(game->observations, game->grid, SIZE * SIZE * sizeof(unsigned char));
+    // sizeof(unsigned char) = 1
+    memcpy(game->observations, game->grid, SIZE * SIZE);
+    memcpy(game->observations + SIZE * SIZE, game->target_states, 3);
 }
 
 void add_log(Game* game) {
@@ -454,17 +454,17 @@ float update_stats_and_get_heuristic_rewards(Game* game) {
 
     /* Heuristic rewards */
     bool max_in_top_left = (game->grid[0][0] == max_tile);
+    game->target_states[0] = max_in_top_left;
 
     // Corner reward: A simple nudge to keep the max tiles horizontally in the top row, left corner.
     // When agents learn to put the max tile on the other corners, or put max tiles vertically
     // they miss out snake rew, and this does happen sometimes.
     if (max_in_top_left && game->grid[0][1] == second_max_tile && max_tile > 4) {
-        heuristic_state_reward += STATE_REWARD_WEIGHT;
-    }
+        game->target_states[1] = true;
+    } else game->target_states[1] = false;
 
     // Snake reward: look for the snake pattern, only when the max tile is at top left
     if (max_in_top_left) {
-        heuristic_state_reward += STATE_REWARD_WEIGHT;
         monotonicity_reward += pow_1_5_lookup[max_tile];
         int evidence_for_snake = 0;
 
@@ -509,6 +509,7 @@ float update_stats_and_get_heuristic_rewards(Game* game) {
         unsigned char snake_tail = game->grid[1][3];
         if (evidence_for_snake >= 4 && snake_tail == max_tile_in_row234) {
             game->is_snake_state = true;
+            game->target_states[2] = game->is_snake_state;
             game->snake_state_tick++;
             snake_reward = snake_tail * snake_tail;
         }
@@ -517,6 +518,7 @@ float update_stats_and_get_heuristic_rewards(Game* game) {
     // Trained models need game->is_snake_state as obs
     if (!game->use_heuristic_rewards) return 0.0f;
 
+    heuristic_state_reward = (float)(game->target_states[0] + game->target_states[1] + game->target_states[2]) * STATE_REWARD_WEIGHT;
     game->heuristic_state_reward += heuristic_state_reward;
     game->monotonicity_reward += monotonicity_reward;
     game->snake_reward += snake_reward;
