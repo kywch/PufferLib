@@ -23,7 +23,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define GAME_OVER_PENALTY -1.0f
 
 // These may need experimenting, but work for now
-#define STATE_REWARD_WEIGHT 0.1f // Fixed, small reward for maintaining "desirable" states
+#define STATE_REWARD_WEIGHT 0.05f // Fixed, small reward for maintaining "desirable" states
 #define MONOTONICITY_REWARD_WEIGHT 0.00003f
 
 // Features: 18 per cell
