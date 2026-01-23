@@ -86,4 +86,11 @@ if __name__ == '__main__':
 
     print('2048 SPS:', int(steps / (time.time() - start)))
 
+    num_dones = 0
+    while num_dones < 300:
+        _, _, dones, _, _ = env.step(actions[i % CACHE])
+        num_dones += dones.sum()
+        i += 1
+    print('2048 gives out non-zero dones.')
+
     env.close()

@@ -135,6 +135,7 @@ void c_close(Game* game);
 void init(Game* game) {
     game->lifetime_max_tile = 0;
     game->is_endgame_env = (rand() / (float)RAND_MAX) < game->endgame_env_prob;
+    memset(game->grid, EMPTY, SIZE * SIZE);
 }
 
 void update_observations(Game* game) {
@@ -300,8 +301,6 @@ void c_reset(Game* game) {
     game->snake_reward = 0;
     game->is_snake_state = false;
     game->stop_at_65536 = game->can_go_over_65536;
-
-    if (game->terminals) game->terminals[0] = 0;
 
     // End game envs only do endgame curriculum
     if (game->is_endgame_env) {
