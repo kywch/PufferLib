@@ -135,43 +135,11 @@ void c_close(Game* game);
 void init(Game* game) {
     game->lifetime_max_tile = 0;
     game->is_endgame_env = (rand() / (float)RAND_MAX) < game->endgame_env_prob;
-    memset(game->grid, EMPTY, SIZE * SIZE);
+    memset(game->grid, 0, SIZE * SIZE * sizeof(unsigned char));
 }
 
 void update_observations(Game* game) {
-    // Observation: 4x4 grid, 18 features per cell
-    // 1. Normalized tile value (current_val / max_val)
-    // 2. One-hot for empty (1 if empty, 0 if occupied)
-    // 3. One-hot for tile values 2^1 to 2^16 (16 features)
-    // 4. Additional obs: is_snake_state (1)
-
-    int num_cell = SIZE * SIZE;
-    int num_additional_obs = 1;
-    memset(game->observations, 0, (num_cell * NUM_FEATURES + num_additional_obs) * sizeof(unsigned char));
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            int feat1_idx = (i * SIZE + j);
-            int feat2_idx = num_cell + feat1_idx;
-            int feat3_idx = 2 * num_cell + 16 * feat1_idx;
-            unsigned char grid_val = game->grid[i][j];
-
-            // Feature 1: The original tile values ** 1.5, to make a bit superlinear within uint8
-            game->observations[feat1_idx] = pow_1_5_lookup[grid_val];
-
-            // Feature 2: One-hot for empty
-            game->observations[feat2_idx] = (grid_val == EMPTY) ? 1 : 0;
-
-            // Features 3-18: One-hot for tile values
-            // NOTE: If this ever gets close to 131072, revisit this
-            if (grid_val > 0) {
-                grid_val = min(grid_val, 16);
-                game->observations[feat3_idx + grid_val - 1] = 1;
-            }
-        }
-    }
-    // Additional obs
-    int offset = num_cell * NUM_FEATURES;
-    game->observations[offset] = game->is_snake_state;
+    memcpy(game->observations, game->grid, SIZE * SIZE * sizeof(unsigned char));
 }
 
 void add_log(Game* game) {
@@ -286,7 +254,7 @@ void set_endgame_curriculum(Game* game) {
 }
 
 void c_reset(Game* game) {
-    memset(game->grid, EMPTY, SIZE * SIZE);
+    memset(game->grid, 0, SIZE * SIZE * sizeof(unsigned char));
     game->score = 0;
     game->tick = 0;
     game->episode_reward = 0;
@@ -301,6 +269,8 @@ void c_reset(Game* game) {
     game->snake_reward = 0;
     game->is_snake_state = false;
     game->stop_at_65536 = game->can_go_over_65536;
+
+    // if (game->terminals) game->terminals[0] = 0;
 
     // End game envs only do endgame curriculum
     if (game->is_endgame_env) {
@@ -552,7 +522,26 @@ float update_stats_and_get_heuristic_rewards(Game* game) {
     game->snake_reward += snake_reward;
     
     return heuristic_state_reward + monotonicity_reward * MONOTONICITY_REWARD_WEIGHT + snake_reward * game->snake_reward_weight;
+
+    /*
+    Thatguy rew
+    https://github.com/drubinstein/PufferLib/blob/2048-remix/pufferlib/ocean/g2048/g2048.h
+
+    // Score is 65536*16 Score is defined as the sum of all powers of 2 > 4
+    int score = 0;
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+        unsigned char val = game->grid[i][j];
+        if (val > 2) {
+            score += (1 << val);
+        }
+        }
+    }
+    // this will get compiled out
+    return ((float)score) / (SIZE * SIZE * 65536.0f);    
+    */
 }
+
 
 void c_step(Game* game) {
     float reward = 0.0f;
