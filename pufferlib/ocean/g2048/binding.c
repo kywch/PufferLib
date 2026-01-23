@@ -27,5 +27,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "monotonicity_reward", log->monotonicity_reward);
     assign_to_dict(dict, "snake_state", log->snake_state);
     assign_to_dict(dict, "snake_reward", log->snake_reward);
+    assign_to_dict(dict, "heuristic_state_reward", log->heuristic_state_reward);
     return 0;
 }
