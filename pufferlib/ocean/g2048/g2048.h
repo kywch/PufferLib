@@ -23,7 +23,7 @@ static inline int max(int a, int b) { return a > b ? a : b; }
 #define GAME_OVER_PENALTY -1.0f
 
 // These may need experimenting, but work for now
-#define STATE_REWARD_WEIGHT 0.05f // Fixed reward for maintaining "desirable" states
+#define STATE_REWARD_WEIGHT 0.01f // Fixed reward for maintaining "desirable" states
 #define MONOTONICITY_REWARD_WEIGHT 0.00003f
 
 
@@ -515,8 +515,18 @@ float update_stats_and_get_heuristic_rewards(Game* game) {
         }
     }
 
+    int tile_score = 0;
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+        unsigned char val = game->grid[i][j];
+        if (val > 2) {
+            tile_score += (1 << val);
+        }
+        }
+    }
+
     // Trained models need game->is_snake_state as obs
-    if (!game->use_heuristic_rewards) return 0.0f;
+    if (!game->use_heuristic_rewards) return ((float)tile_score) / (SIZE * SIZE * 65536.0f);
 
     heuristic_state_reward = (float)(game->target_states[0] + game->target_states[1] + game->target_states[2]) * STATE_REWARD_WEIGHT;
     game->heuristic_state_reward += heuristic_state_reward;
