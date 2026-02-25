@@ -369,10 +369,11 @@ void c_step(Game* game) {
 
     if (did_move) {
         game->moves_made++;
+        // Recompute empty_count after merges so spawning uses the correct count.
+        // place_tile_at_random_cell will decrement empty_count on success.
+        update_stats(game);
         place_tile_at_random_cell(game, get_new_tile());
         game->score += score_add;
-
-        update_stats(game);
 
         // Observations only change if the grid changes
         update_observations(game);
@@ -414,9 +415,9 @@ void step_without_reset(Game* game) {
 
     if (did_move) {
         game->moves_made++;
+        update_stats(game);
         place_tile_at_random_cell(game, get_new_tile());
         game->score += score_add;
-        update_stats(game);
         // Observations only change if the grid changes
         update_observations(game);
     }
