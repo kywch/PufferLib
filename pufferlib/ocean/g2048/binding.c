@@ -16,6 +16,7 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "lifetime_max_tile", log->lifetime_max_tile);
+    assign_to_dict(dict, "reached_16384", log->reached_16384);
     assign_to_dict(dict, "reached_32768", log->reached_32768);
     assign_to_dict(dict, "reached_65536", log->reached_65536);
     assign_to_dict(dict, "reached_131072", log->reached_131072);

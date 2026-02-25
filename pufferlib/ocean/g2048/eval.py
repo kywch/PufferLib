@@ -29,6 +29,7 @@ def evaluate(env_name, load_model_path):
     episode_lengths = sum(n * l for n, l in zip(stats['n'], stats['episode_length'])) / num_episodes
     max_tiles = sum(n * m for n, m in zip(stats['n'], stats['score'])) / num_episodes
     merge_scores = sum(n * s for n, s in zip(stats['n'], stats['merge_score'])) / num_episodes
+    reached_16384 = sum(n * s for n, s in zip(stats['n'], stats['reached_16384'])) / num_episodes
     reached_32768 = sum(n * s for n, s in zip(stats['n'], stats['reached_32768'])) / num_episodes
     reached_65536 = sum(n * s for n, s in zip(stats['n'], stats['reached_65536'])) / num_episodes
     reached_131072 = sum(n * s for n, s in zip(stats['n'], stats['reached_131072'])) / num_episodes
@@ -38,6 +39,7 @@ def evaluate(env_name, load_model_path):
     # The stats from vecenv are averaged across envs that were done in the same tick. Cannot get the single max.
     print(f"Episode length -- Avg: {episode_lengths:.1f}, Max: {max(stats['episode_length']):.1f}")
     print(f"Merge score -- Avg: {merge_scores:.1f}, Max: {max(stats['merge_score']):.1f}")
+    print(f"Reached 16384 prob: {reached_16384*100:.2f} %")
     print(f"Reached 32768 prob: {reached_32768*100:.2f} %")
     print(f"Reached 65536 prob: {reached_65536*100:.2f} %")
     print(f"Reached 131072 prob: {reached_131072*100:.2f} %")
